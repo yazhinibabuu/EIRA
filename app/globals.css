@@ -5,6 +5,8 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: only light;
+
   --ink: #f6f0e8;
   --muted: #c5bdb0;
   --night: #14241f;
