@@ -23,14 +23,15 @@ type HomeResponse = {
   error?: string;
 };
 
-function formatTime(value: string) {
+function formatDate(value: string) {
   const date = new Date(value);
+
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString('en-IN', {
+
+  return date.toLocaleDateString('en-IN', {
     day: 'numeric',
     month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
+    year: 'numeric',
   });
 }
 
@@ -74,7 +75,7 @@ function StoryCard({
       </p>
 
       <p className="mono mt-4 text-[9px] uppercase tracking-wider text-[#aaa297]">
-        {formatTime(story.publishedAt)} · Understand this story
+        {formatDate(story.publishedAt)} · Understand this story
       </p>
     </Link>
   );
@@ -171,18 +172,19 @@ export default function Home() {
         <div className="mx-auto flex max-w-7xl flex-col gap-8">
           <div className="max-w-xl">
             <p className="mono text-xs uppercase tracking-[.17em] text-[#806e74]">
-              A calmer way to see the world
-            </p>
+  Understand what’s happening
+</p>
 
-            <h1 className="serif mt-7 text-5xl leading-[.98] tracking-[-.055em] sm:text-7xl">
-              More understanding.
-              <br />
-              <i>A brighter view.</i>
-            </h1>
+<h1 className="serif mt-7 text-5xl leading-[.98] tracking-[-.055em] sm:text-7xl">
+  Know what happened.
+  <br />
+  <i>Understand why it matters.</i>
+</h1>
 
-            <p className="mt-6 max-w-sm text-lg leading-7 text-[#34425a]">
-              Reliable context for the things changing around you—without the noise.
-            </p>
+<p className="mt-6 max-w-xl text-lg leading-7 text-[#34425a]">
+  EIRA brings together the developments that matter, explains the context,
+  and shows what’s confirmed—so you don’t have to sort through endless headlines.
+</p>
           </div>
 
           <div className="inline-flex w-fit rounded-full border border-[#10233e]/15 bg-white/45 px-4 py-2 text-sm text-[#10233e]">
@@ -209,7 +211,7 @@ export default function Home() {
                       Start here
                     </span>
                     <span className="mono text-[10px] uppercase tracking-wider text-[#6d7280]">
-                      {hero.source} · {formatTime(hero.publishedAt)}
+                      {hero.source} · {formatDate(hero.publishedAt)}
                     </span>
                   </div>
 
@@ -237,7 +239,7 @@ export default function Home() {
 
                 <div className="hidden rounded-2xl bg-[#e9ded2] p-6 text-[#10233e] lg:block">
                   <p className="mono text-[10px] uppercase tracking-[.18em] text-[#a26f63]">
-                    Start where you are
+                    How EIRA helps
                   </p>
 
                   <div className="mt-8 space-y-5">
@@ -257,7 +259,7 @@ export default function Home() {
                     >
                       <b>Ask EIRA</b>
                       <span className="block pt-1 text-sm text-[#556174]">
-                        Ask from current reporting
+                        Ask about something happening now
                       </span>
                     </Link>
 
