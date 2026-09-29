@@ -1,23 +1,33 @@
-# EIRA — frontend MVP
+# EIRA
 
-An atmospheric, accessible Next.js prototype for a calmer way to understand what changed. All story material, statuses, and sources are deliberately labelled as illustrative demo content.
+**Understand the information that matters.**
+
+EIRA is a Next.js information platform designed to help people understand important developments without having to sort through endless information themselves.
+
+## What EIRA does
+
+EIRA is organized around a few core ways of understanding information:
+
+- **Home** — surfaces what matters nationally and globally, with regional relevance where available.
+- **Catch Me Up** — gives context around a topic, including what changed, what is confirmed, what is reported, what remains uncertain, and why it matters.
+- **Explore** — helps discover topics and developments worth understanding.
+- **Ask EIRA** — lets users ask questions about current developments.
+- **Story** — provides deeper context around an individual development.
+- **Library** — lets users follow topics and return to saved areas of interest.
+
+## Tech stack
+
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+- Google Gemini API
+- Google News RSS
+- Supabase / external data services where configured
 
 ## Run locally
 
-This project includes a local Node.js 20.19.6 runtime in `.tools/node`. To install and run without a global Node installation:
+Install dependencies:
 
 ```bash
-./.tools/node/bin/node .tools/node/lib/node_modules/npm/bin/npm-cli.js install
-./.tools/node/bin/node node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 3000
-```
-
-Open `http://localhost:3000`.
-
-## Architecture
-
-- `app/` contains the Home, Living Story, Catch Me Up, Explore, Ask, and Library routes.
-- `components/eira.tsx` holds shared navigation, status, provenance, and interaction primitives.
-- `data/content.ts` holds typed, replaceable demo story, timeline, source, and verification data.
-- `app/globals.css` supplies the contextual visual system, responsive/reduced-motion treatment, and editorial typography.
-
-Review the Home hero and `/story/ocean-current` first: they demonstrate the central living-story hierarchy, uncertainty state, provenance, timeline, and “Start from zero” path.
+npm install
