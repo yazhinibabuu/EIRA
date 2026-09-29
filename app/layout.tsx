@@ -11,6 +11,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" style={{ colorScheme: 'light' }}>
+      <head>
+        <meta name="color-scheme" content="only light" />
+        <meta name="theme-color" content="#e6e5ee" />
+      </head>
       <body>{children}</body>
     </html>
   );
