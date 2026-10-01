@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import Parser from "rss-parser";
+import { NextResponse } from 'next/server';
+import Parser from 'rss-parser';
 
 const parser = new Parser();
 
@@ -11,757 +11,368 @@ type ExploreArticle = {
   url: string;
 };
 
-/* -------------------------------------------------------------------------- */
-/* TEXT HELPERS                                                               */
-/* -------------------------------------------------------------------------- */
+type ExploreCluster = {
+  id: string;
+  title: string;
+  summary: string;
+  source: string;
+  publishedAt: string;
+  url: string;
+  reportCount: number;
+  sources: Array<{
+    name: string;
+    title: string;
+    url: string;
+    publishedAt: string;
+  }>;
+};
+
+const STOP_WORDS = new Set([
+  'the','a','an','and','or','for','with','from','into','about','this','that','these','those',
+  'what','when','where','why','how','who','which','latest','news','today','current','recent',
+  'recently','update','updates','happening','happen','world','in','on','of','to','is','are',
+  'was','were','be','by','as','at','it','its','their','they','them','has','have','had','says',
+  'said','will','would','could','may','might','one','two','three','first','second','top','report',
+  'reports','according','amid','also','more','than','now','just','here','there'
+]);
+
+const EVENT_ANCHORS = [
+  'attack','attacked','assault','stabbed','stabbing','injured','wounded','killed','death','dead',
+  'crash','crashed','flight','pilot','passenger','crew','airport','diverted','evacuated','evacuation',
+  'fire','flood','cyclone','earthquake','arrested','arrest','court','ruling','ruling','ban','banned',
+  'approved','approval','deal','agreement','strike','protest','tariff','sanctions','investment','launch',
+  'launched','resigns','resignation','election','policy','decision','warning','storm','explosion'
+];
 
 function cleanText(value: unknown): string {
-  return String(value ?? "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
+  return String(value ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ')
     .trim();
+}
+
+function cleanTitle(value: unknown): string {
+  return cleanText(value)
+    .replace(/\s*[|–—-]\s*(?:Inshorts|Google News)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanSource(value: unknown, url: string): string {
+  const source = cleanText(value)
+    .replace(/\s*[|–—-]\s*(?:Inshorts|Google News)\s*$/i, '')
+    .trim();
+
+  if (source) return source;
+
+  try {
+    const host = new URL(url).hostname.replace(/^www\./i, '');
+    const parts = host.split('.');
+    return parts.length >= 2
+      ? parts[parts.length - 2]
+          .split(/[-_]/)
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ')
+      : host;
+  } catch {
+    return 'Source';
+  }
 }
 
 function normalize(value: string): string {
   return cleanText(value)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
-/* -------------------------------------------------------------------------- */
-/* SOURCE / PUBLISHER HANDLING                                                */
-/* -------------------------------------------------------------------------- */
+function normalizeToken(token: string) {
+  let value = token.toLowerCase();
+  if (value.length > 5 && value.endsWith('ies')) value = `${value.slice(0, -3)}y`;
+  else if (value.length > 5 && value.endsWith('ves')) value = `${value.slice(0, -3)}f`;
+  else if (value.length > 5 && value.endsWith('ing')) value = value.slice(0, -3);
+  else if (value.length > 4 && value.endsWith('ed')) value = value.slice(0, -2);
+  else if (value.length > 4 && value.endsWith('es')) value = value.slice(0, -2);
+  else if (value.length > 3 && value.endsWith('s')) value = value.slice(0, -1);
+  return value;
+}
 
-/*
- * Google News can sometimes give us a generic feed label such as "Google"
- * instead of the actual publisher.
- *
- * We NEVER want to display those as the article source.
- */
-const GENERIC_SOURCES = new Set([
-  "google",
-  "google news",
-  "google news rss",
-  "news.google.com",
-  "google news feed",
-  "inshorts",
-]);
-
-function isGenericSource(value: string): boolean {
-  return GENERIC_SOURCES.has(
-    normalize(value).replace(/\s+/g, " ")
+function tokens(value: string): Set<string> {
+  return new Set(
+    normalize(value)
+      .split(/\s+/)
+      .map(normalizeToken)
+      .filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
   );
 }
 
-/*
- * Google News commonly formats titles like:
- *
- *   Article headline - The Indian Express
- *
- * or:
- *
- *   Article headline | Inshorts
- *
- * Extract the publisher from the end of the title.
- */
-function extractPublisherFromTitle(value: unknown): string {
-  const raw = cleanText(value);
-
-  if (!raw) {
-    return "";
-  }
-
-  const pipeMatch = raw.match(/\s+\|\s+([^|]+)$/);
-
-  if (pipeMatch?.[1]) {
-    const candidate = cleanText(pipeMatch[1]);
-
-    if (
-      candidate &&
-      !isGenericSource(candidate) &&
-      candidate.length <= 100
-    ) {
-      return candidate;
-    }
-  }
-
-  const dashMatch = raw.match(/\s+-\s+([^-|]+)$/);
-
-  if (dashMatch?.[1]) {
-    const candidate = cleanText(dashMatch[1]);
-
-    if (
-      candidate &&
-      !isGenericSource(candidate) &&
-      candidate.length <= 100
-    ) {
-      return candidate;
-    }
-  }
-
-  return "";
+function queryTerms(query: string): Set<string> {
+  return tokens(query);
 }
 
-function cleanTitle(value: unknown): string {
-  let title = cleanText(value);
-
-  if (!title) {
-    return "";
-  }
-
-  /*
-   * Remove known aggregator suffixes first.
-   */
-  title = title
-    .replace(/\s+\|\s+Inshorts.*$/i, "")
-    .replace(/\s+-\s+Inshorts.*$/i, "")
-    .replace(/\s+\|\s+Google News.*$/i, "")
-    .replace(/\s+-\s+Google News.*$/i, "")
-    .trim();
-
-  /*
-   * If this is a Google News title in the form:
-   *
-   * "Headline - Publisher"
-   *
-   * remove the publisher from the displayed headline.
-   *
-   * We only do this when the ending looks like a real publisher.
-   */
-  const publisher = extractPublisherFromTitle(title);
-
-  if (publisher) {
-    const pipeSuffix = ` | ${publisher}`;
-    const dashSuffix = ` - ${publisher}`;
-
-    if (title.endsWith(pipeSuffix)) {
-      title = title.slice(0, -pipeSuffix.length).trim();
-    } else if (title.endsWith(dashSuffix)) {
-      title = title.slice(0, -dashSuffix.length).trim();
-    }
-  }
-
-  return title;
-}
-
-function sourceFromHostname(
-  url: string
-): string {
-  try {
-    const hostname = new URL(url).hostname
-      .replace(/^www\./i, "")
-      .replace(/^m\./i, "")
-      .toLowerCase();
-
-    /*
-     * Do NOT turn news.google.com into "Google".
-     */
-    if (
-      hostname === "news.google.com" ||
-      hostname.endsWith(".google.com")
-    ) {
-      return "";
-    }
-
-    const knownPublishers: Record<string, string> = {
-      "indianexpress.com": "The Indian Express",
-      "thehindu.com": "The Hindu",
-      "hindustantimes.com": "Hindustan Times",
-      "ndtv.com": "NDTV",
-      "ndtvprofit.com": "NDTV Profit",
-      "cnbctv18.com": "CNBC TV18",
-      "moneycontrol.com": "Moneycontrol",
-      "livemint.com": "Mint",
-      "reuters.com": "Reuters",
-      "bbc.com": "BBC",
-      "bbc.co.uk": "BBC",
-      "cnn.com": "CNN",
-      "business-standard.com": "Business Standard",
-      "businessline.global": "BusinessLine",
-      "deccanherald.com": "Deccan Herald",
-      "timesofindia.indiatimes.com": "The Times of India",
-      "economictimes.indiatimes.com":
-        "The Economic Times",
-      "economictimes.com": "The Economic Times",
-      "theprint.in": "ThePrint",
-      "news18.com": "News18",
-      "firstpost.com": "Firstpost",
-      "thewire.in": "The Wire",
-      "scroll.in": "Scroll.in",
-      "outlookindia.com": "Outlook India",
-      "financialexpress.com": "Financial Express",
-      "telegraphindia.com": "The Telegraph",
-    };
-
-    if (knownPublishers[hostname]) {
-      return knownPublishers[hostname];
-    }
-
-    const parts = hostname.split(".");
-
-    if (parts.length >= 2) {
-      const name = parts[parts.length - 2];
-
-      return name
-        .split(/[-_]/)
-        .map(
-          (word) =>
-            word.charAt(0).toUpperCase() +
-            word.slice(1)
-        )
-        .join(" ");
-    }
-
-    return hostname;
-  } catch {
-    return "";
-  }
-}
-
-/*
- * This is the important fix.
- *
- * Priority:
- *
- * 1. Real <source> publisher from Google News
- * 2. Publisher extracted from Google News title
- * 3. Publisher derived from article URL
- * 4. "Source" as final fallback
- *
- * Generic "Google" / "Google News" is NEVER returned.
- */
-function cleanSource(
-  value: unknown,
-  url: string,
-  title: unknown
-): string {
-  let source = cleanText(value);
-
-  source = source
-    .replace(/\s+\|\s+Inshorts.*$/i, "")
-    .replace(/\s+-\s+Inshorts.*$/i, "")
-    .replace(/\s+\|\s+Google News.*$/i, "")
-    .replace(/\s+-\s+Google News.*$/i, "")
-    .trim();
-
-  /*
-   * If Google gives us the actual publisher, use it.
-   */
-  if (
-    source &&
-    !isGenericSource(source)
-  ) {
-    return source;
-  }
-
-  /*
-   * If source was "Google", inspect the title:
-   *
-   * "What a tripling of India's economy actually demands - The Indian Express"
-   *
-   * becomes:
-   *
-   * "The Indian Express"
-   */
-  const publisherFromTitle =
-    extractPublisherFromTitle(title);
-
-  if (
-    publisherFromTitle &&
-    !isGenericSource(publisherFromTitle)
-  ) {
-    return publisherFromTitle;
-  }
-
-  /*
-   * Try the article URL.
-   *
-   * This is useful when the RSS item contains a real
-   * publisher URL rather than a Google News URL.
-   */
-  const publisherFromUrl =
-    sourceFromHostname(url);
-
-  if (publisherFromUrl) {
-    return publisherFromUrl;
-  }
-
-  return "Source";
-}
-
-/* -------------------------------------------------------------------------- */
-/* SEARCH TERMS                                                               */
-/* -------------------------------------------------------------------------- */
-
-const STOP_WORDS = new Set([
-  "the",
-  "a",
-  "an",
-  "and",
-  "or",
-  "for",
-  "with",
-  "from",
-  "into",
-  "about",
-  "this",
-  "that",
-  "these",
-  "those",
-  "what",
-  "when",
-  "where",
-  "why",
-  "how",
-  "who",
-  "which",
-  "latest",
-  "news",
-  "today",
-  "current",
-  "recent",
-  "recently",
-  "update",
-  "updates",
-  "happening",
-  "happen",
-  "world",
-  "in",
-  "on",
-  "of",
-  "to",
-  "is",
-  "are",
-  "was",
-  "were",
-  "be",
-  "by",
-  "as",
-  "at",
-  "it",
-  "its",
-  "their",
-  "they",
-  "them",
-  "has",
-  "have",
-  "had",
-]);
-
-function getTerms(query: string): string[] {
-  return Array.from(
-    new Set(
-      normalize(query)
-        .split(/\s+/)
-        .filter(
-          (term) =>
-            term.length >= 2 &&
-            !STOP_WORDS.has(term)
-        )
-    )
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* ARTICLE RELEVANCE                                                          */
-/* -------------------------------------------------------------------------- */
-
-function scoreArticle(
-  article: ExploreArticle,
-  query: string
-): number {
-  const terms = getTerms(query);
-
-  if (!terms.length) {
-    return 0;
-  }
-
+function articleRelevance(article: ExploreArticle, query: string): number {
+  const terms = queryTerms(query);
   const title = normalize(article.title);
-
-  const description = normalize(
-    article.description
-  );
-
-  const fullText =
-    `${title} ${description}`;
-
+  const description = normalize(article.description);
   let score = 0;
 
-  /*
-   * Direct term matching.
-   */
   for (const term of terms) {
-    if (title.includes(term)) {
-      score += 8;
-    } else if (
-      description.includes(term)
-    ) {
-      score += 2;
-    }
+    if (title.includes(term)) score += 10;
+    else if (description.includes(term)) score += 2;
   }
 
-  /*
-   * Exact phrase bonus.
-   */
-  const normalizedQuery =
-    normalize(query);
+  if (normalize(query).length > 3 && title.includes(normalize(query))) score += 20;
 
-  if (
-    normalizedQuery.length > 3 &&
-    title.includes(normalizedQuery)
-  ) {
-    score += 20;
-  }
-
-  /*
-   * Concept groups.
-   */
-  const groups = [
-    [
-      "semiconductor",
-      "semiconductors",
-      "chip",
-      "chips",
-      "fab",
-      "fabs",
-      "foundry",
-    ],
-    [
-      "artificial intelligence",
-      "ai",
-      "technology",
-      "software",
-      "data",
-    ],
-    [
-      "india",
-      "indian",
-      "delhi",
-      "government",
-      "minister",
-    ],
-    [
-      "trade",
-      "tariff",
-      "tariffs",
-      "export",
-      "import",
-      "deal",
-      "talks",
-      "negotiation",
-    ],
-    [
-      "business",
-      "company",
-      "companies",
-      "market",
-      "investment",
-      "investments",
-    ],
-    [
-      "science",
-      "scientific",
-      "research",
-      "study",
-      "space",
-      "climate",
-    ],
-  ];
-
-  for (const group of groups) {
-    const queryHasGroup =
-      group.some((term) =>
-        normalizedQuery.includes(term)
-      );
-
-    const articleHasGroup =
-      group.some((term) =>
-        fullText.includes(term)
-      );
-
-    if (
-      queryHasGroup &&
-      articleHasGroup
-    ) {
-      score += 4;
-    }
-  }
-
-  /*
-   * Freshness.
-   */
-  const published =
-    Date.parse(
-      article.publishedAt
-    );
-
-  if (
-    Number.isFinite(published)
-  ) {
-    const ageDays =
-      Math.max(
-        0,
-        (Date.now() - published) /
-          86400000
-      );
-
-    if (ageDays <= 1) {
-      score += 5;
-    } else if (ageDays <= 3) {
-      score += 3;
-    } else if (ageDays <= 7) {
-      score += 1;
-    }
+  const time = Date.parse(article.publishedAt);
+  if (Number.isFinite(time)) {
+    const ageDays = Math.max(0, (Date.now() - time) / 86400000);
+    if (ageDays <= 1) score += 8;
+    else if (ageDays <= 3) score += 5;
+    else if (ageDays <= 7) score += 2;
   }
 
   return score;
 }
 
-/* -------------------------------------------------------------------------- */
-/* DEDUPLICATION                                                              */
-/* -------------------------------------------------------------------------- */
+function articleSimilarity(a: ExploreArticle, b: ExploreArticle, query: string) {
+  if (a.url === b.url) return 1;
 
-function dedupe(
-  articles: ExploreArticle[]
-): ExploreArticle[] {
-  const seen = new Set<string>();
+  const querySet = queryTerms(query);
+  const aTokens = tokens(a.title);
+  const bTokens = tokens(b.title);
+  const aEvent = new Set([...aTokens].filter((token) => !querySet.has(token)));
+  const bEvent = new Set([...bTokens].filter((token) => !querySet.has(token)));
 
-  return articles.filter(
-    (article) => {
-      const key =
-        normalize(article.title);
+  let shared = 0;
+  for (const token of aEvent) if (bEvent.has(token)) shared++;
 
-      if (!key || seen.has(key)) {
-        return false;
-      }
+  const union = new Set([...aEvent, ...bEvent]).size;
+  const jaccard = union ? shared / union : 0;
+  const smaller = Math.min(aEvent.size, bEvent.size);
+  const containment = smaller ? shared / smaller : 0;
 
-      seen.add(key);
-
-      return true;
-    }
-  );
+  return Math.max(jaccard, containment * 0.85);
 }
 
-/* -------------------------------------------------------------------------- */
-/* GOOGLE NEWS RSS                                                             */
-/* -------------------------------------------------------------------------- */
+function sameDevelopingEvent(a: ExploreArticle, b: ExploreArticle, query: string) {
+  if (a.url === b.url) return true;
+  if (articleSimilarity(a, b, query) >= 0.40) return true;
 
-async function fetchNews(
-  query: string
-): Promise<ExploreArticle[]> {
-  const rssUrl =
-    `https://news.google.com/rss/search?q=${encodeURIComponent(
-      query
-    )}&hl=en-IN&gl=IN&ceid=IN:en`;
+  const q = queryTerms(query);
+  const aTokens = tokens(`${a.title} ${a.description}`);
+  const bTokens = tokens(`${b.title} ${b.description}`);
+  const sharedQueryTerms = [...q].filter((term) => aTokens.has(term) && bTokens.has(term));
+  if (!sharedQueryTerms.length) return false;
 
-  const response =
-    await fetch(rssUrl, {
+  const aEvent = new Set([...aTokens].filter((token) => !q.has(token)));
+  const bEvent = new Set([...bTokens].filter((token) => !q.has(token)));
+  const sharedEvent = [...aEvent].filter((token) => bEvent.has(token));
+  const sharedAnchors = sharedEvent.filter((token) => EVENT_ANCHORS.includes(token)).length;
+
+  // A topic/entity search can produce many different stories involving the
+  // same entity. Group reports only when there is meaningful event overlap.
+  if (sharedAnchors >= 1 && sharedEvent.length >= 2) return true;
+  if (sharedAnchors >= 2) return true;
+
+  // For very recent reporting, two shared non-trivial event terms plus the
+  // searched entity is strong evidence that outlets are describing the same
+  // developing incident with different wording.
+  const recentA = Date.now() - Date.parse(a.publishedAt) <= 2 * 86400000;
+  const recentB = Date.now() - Date.parse(b.publishedAt) <= 2 * 86400000;
+  return recentA && recentB && sharedEvent.length >= 3;
+}
+
+function dedupeExact(articles: ExploreArticle[]) {
+  const seen = new Set<string>();
+  return articles.filter((article) => {
+    const key = normalize(article.title);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function stripLeadingTitle(description: string, title: string) {
+  const value = cleanText(description);
+  const clean = cleanText(title);
+  if (!value) return '';
+
+  if (clean) {
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return value.replace(new RegExp(`^${escaped}\\s*[-:|–—]?\\s*`, 'i'), '').trim();
+  }
+
+  return value;
+}
+
+function conciseSummary(description: string, title: string) {
+  let value = stripLeadingTitle(description, title);
+  if (!value) return '';
+
+  // Google News snippets can concatenate several headlines and publisher names.
+  // Keep the first coherent two sentences rather than exposing the feed blob.
+  value = value
+    .replace(/\s*\|\s*(?:Google News|Inshorts)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const sentences = value.match(/[^.!?]+[.!?]+/g) || [];
+  const firstTwo = sentences.slice(0, 2).join(' ').trim();
+  const candidate = firstTwo || value;
+  return candidate.length > 360 ? `${candidate.slice(0, 357).replace(/\s+\S*$/, '')}…` : candidate;
+}
+
+async function fetchArticleSummary(url: string, fallback: string, title: string) {
+  if (!url) return fallback;
+
+  try {
+    const response = await fetch(url, {
+      cache: 'no-store',
+      redirect: 'follow',
       headers: {
-        Accept:
-          "application/rss+xml, application/xml, text/xml",
+        'User-Agent': 'Mozilla/5.0 EIRA/1.0',
+        Accept: 'text/html,application/xhtml+xml',
       },
-      cache: "no-store",
+      signal: AbortSignal.timeout(4500),
     });
 
-  if (!response.ok) {
-    throw new Error(
-      `Google News returned HTTP ${response.status}.`
-    );
-  }
+    if (!response.ok) return fallback;
+    const html = (await response.text()).slice(0, 600000);
+    const patterns = [
+      /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i,
+      /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i,
+    ];
 
-  const xml =
-    await response.text();
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match?.[1]) {
+        const summary = conciseSummary(match[1], title);
+        if (summary) return summary;
+      }
+    }
+  } catch {}
 
-  if (!xml.trim()) {
-    throw new Error(
-      "Google News returned an empty response."
-    );
-  }
-
-  const feed =
-    await parser.parseString(xml);
-
-  const articles =
-    (feed.items ?? [])
-      .map((item: any) => {
-        const url =
-          cleanText(item?.link);
-
-        if (!url) {
-          return null;
-        }
-
-        /*
-         * Google News RSS normally exposes:
-         *
-         * <source url="...">Publisher</source>
-         *
-         * rss-parser commonly puts the text into
-         * item.source._.
-         */
-        const rawSource =
-          item?.source?._ ??
-          item?.source?.name ??
-          item?.source?.title ??
-          item?.creator ??
-          "";
-
-        const rawTitle =
-          item?.title ?? "";
-
-        const title =
-          cleanTitle(rawTitle);
-
-        const source =
-          cleanSource(
-            rawSource,
-            url,
-            rawTitle
-          );
-
-        const publishedAt =
-          cleanText(
-            item?.isoDate ??
-              item?.pubDate ??
-              ""
-          );
-
-        const description =
-          cleanText(
-            item?.contentSnippet ??
-              item?.content ??
-              item?.description ??
-              ""
-          );
-
-        return {
-          title,
-          source,
-          publishedAt,
-          description,
-          url,
-        };
-      })
-      .filter(
-        (
-          item
-        ): item is ExploreArticle =>
-          item !== null &&
-          item.title.length > 0
-      );
-
-  return dedupe(articles);
+  return fallback;
 }
 
-/* -------------------------------------------------------------------------- */
-/* GET                                                                         */
-/* -------------------------------------------------------------------------- */
+async function fetchNews(query: string): Promise<ExploreArticle[]> {
+  const searches = [
+    `${query} when:7d`,
+    `${query} latest when:7d`,
+  ];
 
-export async function GET(
-  request: Request
-) {
+  const feeds = await Promise.allSettled(
+    searches.map(async (search) => {
+      const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(search)}&hl=en-IN&gl=IN&ceid=IN:en`;
+      const response = await fetch(rssUrl, {
+        cache: 'no-store',
+        headers: { Accept: 'application/rss+xml, application/xml, text/xml' },
+      });
+      if (!response.ok) throw new Error(`Google News returned HTTP ${response.status}.`);
+      return parser.parseString(await response.text());
+    })
+  );
+
+  const articles = feeds.flatMap((result) => {
+    if (result.status !== 'fulfilled') return [];
+    return (result.value.items ?? []).map((item: any) => {
+      const url = cleanText(item?.link);
+      if (!url) return null;
+      return {
+        title: cleanTitle(item?.title),
+        source: cleanSource(item?.source?._ ?? item?.source?.name ?? item?.source?.title ?? '', url),
+        publishedAt: cleanText(item?.isoDate ?? item?.pubDate ?? ''),
+        description: cleanText(item?.contentSnippet ?? item?.content ?? item?.description ?? ''),
+        url,
+      } satisfies ExploreArticle;
+    }).filter(Boolean) as ExploreArticle[];
+  });
+
+  return dedupeExact(articles);
+}
+
+function clusterArticles(articles: ExploreArticle[], query: string): ExploreArticle[][] {
+  const ranked = articles
+    .map((article) => ({ article, score: articleRelevance(article, query) }))
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.article);
+
+  const clusters: ExploreArticle[][] = [];
+
+  for (const article of ranked) {
+    const existing = clusters.find((cluster) => sameDevelopingEvent(cluster[0], article, query));
+    if (existing) existing.push(article);
+    else clusters.push([article]);
+  }
+
+  return clusters;
+}
+
+export async function GET(request: Request) {
   try {
-    const url =
-      new URL(request.url);
-
-    const query =
-      url.searchParams
-        .get("q")
-        ?.trim() ?? "";
+    const url = new URL(request.url);
+    const query = url.searchParams.get('q')?.trim() ?? '';
 
     if (!query) {
-      return NextResponse.json(
-        {
-          query: "",
-          results: [],
-        },
-        {
-          status: 200,
-        }
-      );
+      return NextResponse.json({ topic: '', results: [], resultCount: 0, retrievedAt: new Date().toISOString() });
     }
 
-    const articles =
-      await fetchNews(query);
-
-    const ranked =
-      articles
-        .map((article) => ({
-          article,
-          score:
-            scoreArticle(
-              article,
-              query
-            ),
-        }))
-        .sort(
-          (a, b) =>
-            b.score - a.score
-        );
-
-    /*
-     * Only return reasonably relevant
-     * results.
-     */
-    let results =
-      ranked
-        .filter(
-          (item) =>
-            item.score >= 4
-        )
-        .slice(0, 8)
-        .map(
-          (item) =>
-            item.article
-        );
-
-    /*
-     * If nothing passed the threshold,
-     * return the strongest few results.
-     */
-    if (!results.length) {
-      results =
-        ranked
-          .slice(0, 5)
-          .map(
-            (item) =>
-              item.article
-          );
+    const articles = await fetchNews(query);
+    if (!articles.length) {
+      return NextResponse.json({ topic: query, results: [], resultCount: 0, retrievedAt: new Date().toISOString() });
     }
+
+    const clusters = clusterArticles(articles, query).slice(0, 8);
+    const topClusters = clusters.slice(0, 8);
+
+    const results: ExploreCluster[] = await Promise.all(topClusters.map(async (cluster, index) => {
+      const representative = cluster[0];
+      const fallback = conciseSummary(representative.description, representative.title);
+      const summary = await fetchArticleSummary(representative.url, fallback, representative.title);
+
+      return {
+        id: `cluster-${index + 1}`,
+        title: representative.title,
+        summary: summary || 'Current reporting is available from the sources below.',
+        source: representative.source,
+        publishedAt: representative.publishedAt,
+        url: representative.url,
+        reportCount: cluster.length,
+        sources: cluster.slice(0, 8).map((article) => ({
+          name: article.source,
+          title: article.title,
+          url: article.url,
+          publishedAt: article.publishedAt,
+        })),
+      };
+    }));
 
     return NextResponse.json(
       {
-        query,
+        topic: query,
         results,
+        resultCount: results.length,
+        retrievedAt: new Date().toISOString(),
       },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control":
-            "no-store",
-        },
-      }
+      { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch (error) {
-    console.error(
-      "EIRA Explore API error:",
-      error
-    );
-
+    console.error('EIRA Explore API error:', error);
     return NextResponse.json(
       {
-        query: "",
+        topic: '',
         results: [],
-        error:
-          error instanceof Error
-            ? error.message
-            : "Explore could not load right now.",
+        resultCount: 0,
+        error: error instanceof Error ? error.message : 'Explore could not load right now.',
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
