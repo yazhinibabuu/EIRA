@@ -1859,11 +1859,9 @@ export default function Home() {
 
 <div className="relative z-10">
 
-          <div className="[&_a]:!text-white [&_button]:!text-white [&_svg]:!text-white">
-
-            <Nav />
-
-          </div>
+          <div className="[&>header>div>a]:!text-white [&>header>div>nav]:!text-white [&>header>div>div]:!text-white [&>header>div>button]:!text-white">
+  <Nav />
+</div>
 
 
 
@@ -1881,15 +1879,15 @@ export default function Home() {
 
 
 
-                <h1 className="serif mt-5 max-w-[680px] text-[48px] leading-[.94] tracking-[-.055em] text-white drop-shadow-[0_3px_18px_rgba(0,0,0,.22)] sm:text-[68px] lg:text-[78px]">
+<h1 className="serif mt-5 text-[34px] leading-[.94] tracking-[-.045em] text-white drop-shadow-[0_3px_18px_rgba(0,0,0,.22)] sm:max-w-[680px] sm:text-[68px] lg:text-[78px]">
+  <span className="block">
+    {ui.headline1}
+  </span>
 
-                  {ui.headline1}
-
-                  <br />
-
-                  <i>{ui.headline2}</i>
-
-                </h1>
+  <span className="block text-[30px] leading-[.98] sm:text-[68px] sm:leading-[.94] lg:text-[78px]">
+    <i>{ui.headline2}</i>
+  </span>
+</h1>
 
 
 

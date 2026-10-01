@@ -104,7 +104,7 @@ export function Nav() {
   const ink = isHome ? 'text-[#10233e]' : 'text-[#f6f0e8]';
 
   return (
-    <header className={`absolute top-0 z-30 w-full px-5 py-5 sm:px-8 ${ink}`}>
+    <header className={`absolute top-0 z-30 w-full px-5 py-2 sm:px-8 sm:py-5 ${ink}`}>
       <div className="mx-auto flex max-w-7xl items-center justify-between">
         <Wordmark />
 
