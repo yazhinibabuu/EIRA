@@ -1929,10 +1929,8 @@ export default function Home() {
 
               ) : loading ? (
 
-                <div className="rounded-[30px] border border-white/80 bg-white/70 p-8 text-[#10233e] shadow-[0_28px_90px_rgba(31,42,59,.18)] backdrop-blur-xl">
-
+                <div className="relative mt-8 flex min-h-[300px] items-center overflow-hidden rounded-[28px] border border-white/30 bg-white/70 p-8 text-[#10233e] shadow-[0_30px_90px_rgba(0,0,0,.18)] backdrop-blur-xl lg:mt-10">
                   {ui.loading} {region}…
-
                 </div>
 
               ) : hero ? (
