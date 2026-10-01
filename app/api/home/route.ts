@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getLanguageFromRequest, translateHomeStories } from '@/utils/eira-translate'
 
 type Story = {
   title: string;
@@ -541,13 +542,13 @@ function baseImportanceScore(story: Story) {
   score += sourceQuality(story.source) * 2;
 
   const age = hoursOld(story.publishedAt);
-  if (age <= 3) score += 22;
-  else if (age <= 6) score += 19;
-  else if (age <= 12) score += 15;
-  else if (age <= 18) score += 11;
+  if (age <= 3) score += 16;
+  else if (age <= 6) score += 13;
+  else if (age <= 12) score += 10;
+  else if (age <= 18) score += 8;
   else if (age <= 24) score += 6;
-  else if (age <= 30) score += 1;
-  else score -= 4;
+  else if (age <= 30) score += 3;
+  else score -= 2;
 
   return score;
 }
@@ -704,6 +705,7 @@ function detectRegion(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const region = detectRegion(request);
+    const language = getLanguageFromRequest(request);
 
     // EIRA Home is a current-news product, not a static three-story feed.
     // Build a broad fresh candidate pool on every request, then select the
@@ -838,13 +840,19 @@ export async function GET(request: NextRequest) {
       attachArticleImages(formattedWorld),
     ]);
 
+    const [regionalTranslated, indiaTranslated, worldTranslated] = await Promise.all([
+      translateHomeStories(regionalWithImages, language),
+      translateHomeStories(indiaWithImages, language),
+      translateHomeStories(worldWithImages, language),
+    ]);
+
     return NextResponse.json(
       {
         region,
         regionCode: Object.entries(STATE_CODES).find(([, name]) => name === region)?.[0] || '',
-        regional: regionalWithImages.slice(0, 3),
-        india: indiaWithImages.slice(0, 3),
-        world: worldWithImages.slice(0, 2),
+        regional: regionalTranslated.slice(0, 3),
+        india: indiaTranslated.slice(0, 3),
+        world: worldTranslated.slice(0, 2),
         // Additional current candidates are available to the client without
         // changing the existing Home layout.
         currentPool: {

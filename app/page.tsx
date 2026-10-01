@@ -22,7 +22,7 @@ import { useEffect, useState } from 'react';
 
 
 
-import { Nav, Footer, SectionLabel } from '@/components/eira';
+import { Footer, Nav, SectionLabel } from '@/components/eira';
 
 
 
@@ -1611,7 +1611,7 @@ export default function Home() {
     return () => {
       window.clearInterval(refreshTimer);
     };
-  }, []);
+  }, [language]);
 
 
 

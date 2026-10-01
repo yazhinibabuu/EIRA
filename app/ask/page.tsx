@@ -2,7 +2,7 @@
 
 
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ArrowUp, ExternalLink } from 'lucide-react';
 
@@ -19,6 +19,7 @@ import {
   Status,
 
 } from '@/components/eira';
+import { getStoredLanguage, type Language } from '@/components/language-switcher';
 
 
 
@@ -83,6 +84,18 @@ type AskResponse = {
 };
 
 
+
+const copy = {
+  en: {
+    label: 'Ask EIRA', title1: 'Ask from the', title2: 'evidence.', desc: 'Ask about something happening in the world. EIRA researches current reporting and separates what is known from what is still uncertain.', question: 'Your question', placeholder: 'What do you want to understand?', note: 'EIRA will use current reporting and show its sources.', tryAsking: 'Try asking', researching: 'Researching', researchingTitle: 'Looking into what is known about your question.', errorTitle: 'EIRA could not answer', yourQuestion: 'Your question', in20: 'In 20 seconds', whatChanged: 'What changed', evidence: "What we know — and what we don't", supported: 'Directly supported by the available reporting', reported: 'Reported, but not independently established', unresolved: 'What remains unresolved', why: 'Why it matters', watch: 'What to watch', sources: 'Sources', how: 'How EIRA answers', howDesc: 'EIRA separates supported facts, reported claims, and unresolved questions instead of presenting every statement as equally certain.', examples: ['What is changing in AI right now?', 'What is happening with India US trade talks?', 'What is happening in Tamil Nadu?', 'What is happening in the semiconductor industry?']
+  },
+  ta: {
+    label: 'EIRA-விடம் கேளுங்கள்', title1: 'ஆதாரங்களிலிருந்து', title2: 'கேளுங்கள்.', desc: 'உலகில் நடக்கும் நிகழ்வுகளைப் பற்றி கேளுங்கள். EIRA தற்போதைய செய்திகளை ஆய்ந்து, தெரிந்தவை மற்றும் இன்னும் உறுதி செய்யப்படாதவற்றைத் தனித்தனியாகக் காட்டுகிறது.', question: 'உங்கள் கேள்வி', placeholder: 'நீங்கள் எதைப் புரிந்துகொள்ள விரும்புகிறீர்கள்?', note: 'EIRA தற்போதைய செய்திகளைப் பயன்படுத்தி அதன் ஆதாரங்களைக் காட்டும்.', tryAsking: 'இவற்றைக் கேட்டு பாருங்கள்', researching: 'ஆராய்கிறது', researchingTitle: 'உங்கள் கேள்வியைப் பற்றி தெரிந்த தகவல்களைத் தேடுகிறது.', errorTitle: 'EIRA-வால் பதிலளிக்க முடியவில்லை', yourQuestion: 'உங்கள் கேள்வி', in20: '20 விநாடிகளில்', whatChanged: 'என்ன மாறியது', evidence: 'நமக்குத் தெரிந்தவை — தெரியாதவை', supported: 'கிடைத்த செய்திகளால் நேரடியாக ஆதரிக்கப்படுகிறது', reported: 'தெரிவிக்கப்பட்டுள்ளது, ஆனால் தனியாக உறுதி செய்யப்படவில்லை', unresolved: 'இன்னும் தீர்க்கப்படாதவை', why: 'இது ஏன் முக்கியம்', watch: 'எதைக் கவனிக்க வேண்டும்', sources: 'ஆதாரங்கள்', how: 'EIRA எவ்வாறு பதிலளிக்கிறது', howDesc: 'ஆதரிக்கப்பட்ட உண்மைகள், தெரிவிக்கப்பட்ட கூற்றுகள் மற்றும் தீர்க்கப்படாத கேள்விகளை EIRA தனித்தனியாகக் காட்டுகிறது.', examples: ['இப்போது AI துறையில் என்ன மாறுகிறது?', 'இந்தியா-அமெரிக்க வர்த்தகப் பேச்சுவார்த்தைகளில் என்ன நடக்கிறது?', 'தமிழ்நாட்டில் என்ன நடக்கிறது?', 'குறைக்கடத்தி துறையில் என்ன நடக்கிறது?']
+  },
+  hi: {
+    label: 'EIRA से पूछें', title1: 'सबूतों से', title2: 'पूछें।', desc: 'दुनिया में हो रही घटनाओं के बारे में पूछें। EIRA मौजूदा रिपोर्टिंग पर शोध करता है और ज्ञात बातों को अनिश्चित बातों से अलग करता है।', question: 'आपका सवाल', placeholder: 'आप क्या समझना चाहते हैं?', note: 'EIRA मौजूदा रिपोर्टिंग का उपयोग करेगा और उसके स्रोत दिखाएगा।', tryAsking: 'यह पूछकर देखें', researching: 'शोध जारी है', researchingTitle: 'आपके सवाल के बारे में उपलब्ध जानकारी देखी जा रही है।', errorTitle: 'EIRA जवाब नहीं दे सका', yourQuestion: 'आपका सवाल', in20: '20 सेकंड में', whatChanged: 'क्या बदला', evidence: 'हम क्या जानते हैं — और क्या नहीं', supported: 'उपलब्ध रिपोर्टिंग से सीधे समर्थित', reported: 'रिपोर्ट किया गया, लेकिन स्वतंत्र रूप से स्थापित नहीं', unresolved: 'जो अभी स्पष्ट नहीं है', why: 'यह क्यों मायने रखता है', watch: 'क्या देखना है', sources: 'स्रोत', how: 'EIRA कैसे जवाब देता है', howDesc: 'EIRA समर्थित तथ्यों, रिपोर्ट किए गए दावों और अनसुलझे सवालों को अलग रखता है।', examples: ['अभी AI में क्या बदल रहा है?', 'भारत-अमेरिका व्यापार वार्ताओं में क्या हो रहा है?', 'तमिलनाडु में क्या हो रहा है?', 'सेमीकंडक्टर उद्योग में क्या हो रहा है?']
+  },
+} as const;
 
 function getSources(
 
@@ -225,6 +238,20 @@ export default function Ask() {
   const [loading, setLoading] = useState(false);
 
   const [error, setError] = useState('');
+  const [language, setLanguage] = useState<Language>('en');
+
+  useEffect(() => {
+    const sync = () => setLanguage(getStoredLanguage());
+    sync();
+    window.addEventListener('storage', sync);
+    window.addEventListener('eira:language-changed', sync);
+    return () => {
+      window.removeEventListener('storage', sync);
+      window.removeEventListener('eira:language-changed', sync);
+    };
+  }, []);
+
+  const ui = copy[language];
 
 
 
@@ -362,17 +389,17 @@ export default function Ask() {
 
       <div className="mx-auto max-w-4xl px-6 pb-20 pt-36 sm:px-10">
 
-        <SectionLabel>Ask EIRA</SectionLabel>
+        <SectionLabel>{ui.label}</SectionLabel>
 
 
 
         <h1 className="serif max-w-3xl text-5xl leading-[.98] tracking-[-.05em] sm:text-7xl">
 
-          Ask from the
+          {ui.title1}
 
           <br />
 
-          <i>evidence.</i>
+          <i>{ui.title2}</i>
 
         </h1>
 
@@ -380,11 +407,7 @@ export default function Ask() {
 
         <p className="mt-6 max-w-xl text-lg leading-8 text-[#d5cdc1]">
 
-          Ask about something happening in the world. EIRA researches
-
-          current reporting and separates what is known from what is
-
-          still uncertain.
+          {ui.desc}
 
         </p>
 
@@ -406,7 +429,7 @@ export default function Ask() {
 
           >
 
-            Your question
+            {ui.question}
 
           </label>
 
@@ -424,7 +447,7 @@ export default function Ask() {
 
             }
 
-            placeholder="What do you want to understand?"
+            placeholder={ui.placeholder}
 
             className="min-h-28 w-full resize-none bg-transparent p-3 text-lg leading-7 outline-none placeholder:text-[#8f9188]"
 
@@ -436,7 +459,7 @@ export default function Ask() {
 
             <span className="text-xs text-[#aaa398]">
 
-              EIRA will use current reporting and show its sources.
+              {ui.note}
 
             </span>
 
@@ -450,7 +473,7 @@ export default function Ask() {
 
               className="grid h-11 w-11 shrink-0 place-items-center self-end rounded-full bg-[#eedac0] text-[#1e3128] transition hover:bg-[#f3e3d0] disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
 
-              aria-label="Ask EIRA"
+              aria-label={ui.label}
 
             >
 
@@ -468,7 +491,7 @@ export default function Ask() {
 
           <section className="mt-10">
 
-            <SectionLabel>Try asking</SectionLabel>
+            <SectionLabel>{ui.tryAsking}</SectionLabel>
 
 
 
@@ -476,13 +499,7 @@ export default function Ask() {
 
               {[
 
-                'What is changing in AI right now?',
-
-                'What is happening with India US trade talks?',
-
-                'What is happening in Tamil Nadu?',
-
-                'What is happening in the semiconductor industry?',
+                ...ui.examples,
 
               ].map((example) => (
 
@@ -518,7 +535,7 @@ export default function Ask() {
 
             <p className="mono text-[10px] uppercase tracking-widest text-[#e3aa72]">
 
-              Researching
+              {ui.researching}
 
             </p>
 
@@ -526,7 +543,7 @@ export default function Ask() {
 
             <h2 className="serif mt-3 text-3xl">
 
-              Looking into what is known about your question.
+              {ui.researchingTitle}
 
             </h2>
 
@@ -550,7 +567,7 @@ export default function Ask() {
 
             <p className="mono text-[10px] uppercase tracking-widest text-[#e3aa72]">
 
-              EIRA could not answer
+              {ui.errorTitle}
 
             </p>
 
@@ -590,7 +607,7 @@ export default function Ask() {
 
               <p className="mono text-[10px] uppercase tracking-widest text-[#8d684b]">
 
-                In 20 seconds
+                {ui.in20}
 
               </p>
 
@@ -612,7 +629,7 @@ export default function Ask() {
 
               <section className="mt-12">
 
-                <SectionLabel>What changed</SectionLabel>
+                <SectionLabel>{ui.whatChanged}</SectionLabel>
 
 
 
@@ -649,7 +666,7 @@ export default function Ask() {
 
               <SectionLabel>
 
-                What we know
+                {ui.evidence}
 
               </SectionLabel>
 
@@ -669,7 +686,7 @@ export default function Ask() {
 
                       <span className="text-xs text-[#9f9a90]">
 
-                        Directly supported by the available reporting
+                        {ui.supported}
 
                       </span>
 
@@ -713,7 +730,7 @@ export default function Ask() {
 
                       <span className="text-xs text-[#9f9a90]">
 
-                        Reported, but not independently established
+                        {ui.reported}
 
                       </span>
 
@@ -757,7 +774,7 @@ export default function Ask() {
 
                       <span className="text-xs text-[#9f9a90]">
 
-                        What remains unresolved
+                        {ui.unresolved}
 
                       </span>
 
@@ -800,7 +817,7 @@ export default function Ask() {
 
               <section className="mt-12">
 
-                <SectionLabel>Why it matters</SectionLabel>
+                <SectionLabel>{ui.why}</SectionLabel>
 
 
 
@@ -826,7 +843,7 @@ export default function Ask() {
 
               <section className="mt-12">
 
-                <SectionLabel>What to watch</SectionLabel>
+                <SectionLabel>{ui.watch}</SectionLabel>
 
 
 
@@ -876,7 +893,7 @@ export default function Ask() {
 
                 <SectionLabel>
 
-                  Sources · {sources.length}
+                  {ui.sources} · {sources.length}
 
                 </SectionLabel>
 

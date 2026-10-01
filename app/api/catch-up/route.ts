@@ -3,6 +3,7 @@ import * as RSSParserModule from "rss-parser";
 import { GoogleGenAI } from "@google/genai";
 
 import { NextResponse } from "next/server";
+import { getLanguageFromRequest, translateCatchUpResult, translateStoryResult } from '@/utils/eira-translate'
 
 
 
@@ -2681,145 +2682,6 @@ function storyClusterOverlap(article: Article, selected: Article[]): number {
   );
 }
 
-type StoryCluster = {
-  lead: Article;
-  members: Article[];
-  score: number;
-};
-
-function articleSubstantiveSignal(article: Article): number {
-  const text = normalizeText(`${article.title} ${article.description}`);
-
-  const substantiveTerms = [
-    "industry", "market", "markets", "chart", "charts", "billboard",
-    "album", "single", "debut", "release", "released", "streaming",
-    "tour", "touring", "concert", "agency", "agencies", "label", "labels",
-    "sales", "revenue", "business", "investment", "global", "international",
-    "contract", "partnership", "platform", "platforms", "policy", "regulation",
-    "lawsuit", "copyright", "ai", "artificial intelligence", "generated",
-    "ranking", "ranked", "award", "awards", "group", "groups",
-  ];
-
-  const incidentalTerms = [
-    "fever", "illness", "hospital", "health", "health scare", "filming",
-    "vacation", "dating", "relationship", "personality", "actor", "actress",
-    "celebrity", "apology", "rumor", "rumour", "personal life",
-  ];
-
-  let score = 0;
-  for (const term of substantiveTerms) {
-    if (text.includes(term)) score += 2;
-  }
-  for (const term of incidentalTerms) {
-    if (text.includes(term)) score -= 3;
-  }
-
-  return score;
-}
-
-function articleClusterSimilarity(a: Article, b: Article): number {
-  const aTerms = new Set(tokenize(`${a.title} ${a.description}`));
-  const bTerms = new Set(tokenize(`${b.title} ${b.description}`));
-  if (!aTerms.size || !bTerms.size) return 0;
-
-  let overlap = 0;
-  for (const term of aTerms) {
-    if (bTerms.has(term)) overlap++;
-  }
-
-  return overlap / Math.max(1, Math.min(aTerms.size, bTerms.size));
-}
-
-function buildStoryClusters(
-  articles: Article[],
-  topic: string
-): StoryCluster[] {
-  const ranked = sortByFreshnessAndRelevance(articles, topic);
-  const clusters: StoryCluster[] = [];
-
-  for (const article of ranked) {
-    let bestCluster: StoryCluster | null = null;
-    let bestSimilarity = 0;
-
-    for (const cluster of clusters) {
-      const similarity = Math.max(
-        ...cluster.members.map((member) =>
-          articleClusterSimilarity(article, member)
-        )
-      );
-
-      if (similarity > bestSimilarity) {
-        bestSimilarity = similarity;
-        bestCluster = cluster;
-      }
-    }
-
-    // Strong title/content overlap means these are probably the same story.
-    if (bestCluster && bestSimilarity >= 0.48) {
-      bestCluster.members.push(article);
-      continue;
-    }
-
-    clusters.push({
-      lead: article,
-      members: [article],
-      score: 0,
-    });
-  }
-
-  const now = Date.now();
-
-  for (const cluster of clusters) {
-    const sources = new Set(
-      cluster.members.map((member) => normalizeText(member.source)).filter(Boolean)
-    );
-
-    const bestRelevance = Math.max(
-      ...cluster.members.map((member) => scoreTopicRelevance(member, topic))
-    );
-
-    const freshest = Math.max(
-      ...cluster.members.map((member) => {
-        const date = Date.parse(member.publishedAt || "");
-        if (!Number.isFinite(date)) return 0;
-        const age = Math.max(0, (now - date) / 86400000);
-        return Math.max(0, 10 - age * 0.5);
-      })
-    );
-
-    const supportBonus = Math.min(8, Math.max(0, cluster.members.length - 1) * 2.5);
-    const sourceBonus = Math.min(6, sources.size * 2);
-    const substantive = Math.max(
-      ...cluster.members.map(articleSubstantiveSignal)
-    );
-
-    cluster.score =
-      bestRelevance * 2.5 +
-      freshest +
-      supportBonus +
-      sourceBonus +
-      substantive;
-
-    cluster.lead = [...cluster.members].sort((a, b) => {
-      const scoreA =
-        scoreTopicRelevance(a, topic) * 2 +
-        articleSubstantiveSignal(a) +
-        (articleAgeInDays(a) !== null
-          ? Math.max(0, 10 - (articleAgeInDays(a) ?? 30) * 0.5)
-          : 0);
-      const scoreB =
-        scoreTopicRelevance(b, topic) * 2 +
-        articleSubstantiveSignal(b) +
-        (articleAgeInDays(b) !== null
-          ? Math.max(0, 10 - (articleAgeInDays(b) ?? 30) * 0.5)
-          : 0);
-      return scoreB - scoreA;
-    })[0];
-  }
-
-  return clusters.sort((a, b) => b.score - a.score);
-}
-
 function selectCatchUpArticles(
   articles: Article[],
   topic: string
@@ -2835,63 +2697,73 @@ function selectCatchUpArticles(
   });
 
   const pool =
-    recent14.length >= 8
+    recent14.length >= 6
       ? recent14
-      : recent30.length >= 8
+      : recent30.length >= 6
         ? recent30
         : sorted;
 
   const relevant = pool.filter(
     (article) => scoreTopicRelevance(article, topic) >= 2
   );
-  const candidates = relevant.length >= 6 ? relevant : pool;
+  const candidates = relevant.length >= 3 ? relevant : pool;
   const broadTopic = getTopicTerms(topic).length <= 4;
-
-  if (!broadTopic) {
-    return candidates.slice(0, 4);
-  }
-
-  const clusters = buildStoryClusters(candidates, topic);
-  if (!clusters.length) return sorted.slice(0, 4);
-
-  // Do not manufacture breadth. Keep only clusters that are close enough to
-  // the strongest cluster to be genuinely relevant to the topic.
-  const topScore = clusters[0].score;
-  const meaningfulClusters = clusters.filter((cluster, index) => {
-    if (index === 0) return true;
-    return cluster.score >= Math.max(12, topScore * 0.58);
-  });
+  const repeatedPhrases = dominantStoryPhrases(candidates);
 
   const selected: Article[] = [];
   const selectedSources = new Set<string>();
 
-  for (const cluster of meaningfulClusters.slice(0, 3)) {
-    const lead = cluster.lead;
-    if (!lead) continue;
+  while (selected.length < 4 && candidates.length) {
+    let best: Article | null = null;
+    let bestScore = -Infinity;
 
-    selected.push(lead);
-    const source = normalizeText(lead.source);
+    for (const article of candidates) {
+      if (selected.includes(article)) continue;
+
+      const source = normalizeText(article.source);
+      const relevance = scoreTopicRelevance(article, topic);
+      const age = articleAgeInDays(article);
+      const freshness = age === null ? 0 : Math.max(0, 10 - age * 0.5);
+      const maxSimilarity = selected.length
+        ? Math.max(...selected.map((item) => articleSimilarity(article, item)))
+        : 0;
+      const clusterOverlap = storyClusterOverlap(article, selected);
+
+      // For broad topics, never let several articles about the same
+      // franchise/product/person/event fill the answer.
+      if (broadTopic && clusterOverlap >= 2) continue;
+
+      const repeatedPhraseHits = titlePhrases(article).filter((phrase) =>
+        repeatedPhrases.has(phrase)
+      ).length;
+
+      const noveltyBonus = 16 * (1 - maxSimilarity);
+      const sourceBonus = source && !selectedSources.has(source) ? 7 : -8;
+      const clusterPenalty = broadTopic
+        ? repeatedPhraseHits * 8
+        : repeatedPhraseHits * 4;
+
+      const score =
+        relevance * 2 +
+        freshness +
+        noveltyBonus +
+        sourceBonus -
+        clusterPenalty;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = article;
+      }
+    }
+
+    if (!best) break;
+
+    selected.push(best);
+    const source = normalizeText(best.source);
     if (source) selectedSources.add(source);
   }
 
-  // Add one corroborating source for the strongest story when it is genuinely
-  // the same story and comes from a different publication.
-  const strongest = clusters[0];
-  if (selected.length < 4 && strongest) {
-    const corroboration = strongest.members.find((article) => {
-      const source = normalizeText(article.source);
-      return (
-        article !== strongest.lead &&
-        source &&
-        !selectedSources.has(source) &&
-        articleClusterSimilarity(article, strongest.lead) >= 0.55
-      );
-    });
-
-    if (corroboration) selected.push(corroboration);
-  }
-
-  return selected.length ? selected.slice(0, 4) : sorted.slice(0, 4);
+  return selected.length > 0 ? selected : sorted.slice(0, 4);
 }
 
 async function generateCatchUpAnswer(
@@ -3149,16 +3021,24 @@ async function fetchGoogleNews(
       .map(articleFromItem)
 
       .filter(
-  (
-    article: Article | null
-  ): article is Article =>
-    Boolean(article)
-)
+
+        (
+
+          article
+
+        ): article is Article =>
+
+          Boolean(article)
+
+      )
 
       .filter(
-  (article: Article) =>
-    article.title.length > 0
-)
+
+        (article) =>
+
+          article.title.length > 0
+
+      );
 
 
 
@@ -3265,6 +3145,8 @@ export async function POST(
 ) {
 
   try {
+
+    const language = getLanguageFromRequest(request);
 
     const body =
 
@@ -3550,11 +3432,12 @@ export async function POST(
 
         );
 
-
+      const translatedResult =
+        await translateStoryResult(result, language);
 
       return NextResponse.json({
 
-        result,
+        result: translatedResult,
 
         sources,
 
@@ -3646,6 +3529,9 @@ export async function POST(
 
 
 
+    const translatedResult =
+      await translateCatchUpResult(result, language);
+
     const catchUpSources =
 
       sources.map((source, index) => ({
@@ -3658,7 +3544,7 @@ export async function POST(
 
     return NextResponse.json({
 
-      result,
+      result: translatedResult,
 
       sources: catchUpSources,
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import Parser from 'rss-parser';
+import { getLanguageFromRequest, translateExploreResults } from '@/utils/eira-translate'
 
 const parser = new Parser();
 
@@ -319,6 +320,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const query = url.searchParams.get('q')?.trim() ?? '';
+    const language = getLanguageFromRequest(request);
 
     if (!query) {
       return NextResponse.json({ topic: '', results: [], resultCount: 0, retrievedAt: new Date().toISOString() });
@@ -354,11 +356,13 @@ export async function GET(request: Request) {
       };
     }));
 
+    const translatedResults = await translateExploreResults(results, language);
+
     return NextResponse.json(
       {
         topic: query,
-        results,
-        resultCount: results.length,
+        results: translatedResults,
+        resultCount: translatedResults.length,
         retrievedAt: new Date().toISOString(),
       },
       { headers: { 'Cache-Control': 'no-store' } }
