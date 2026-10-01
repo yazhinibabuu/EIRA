@@ -3021,24 +3021,16 @@ async function fetchGoogleNews(
       .map(articleFromItem)
 
       .filter(
-
-        (
-
-          article
-
-        ): article is Article =>
-
-          Boolean(article)
-
-      )
+  (
+    article: Article | null | undefined
+  ): article is Article =>
+    Boolean(article)
+)
 
       .filter(
-
-        (article) =>
-
-          article.title.length > 0
-
-      );
+  (article: Article) =>
+    article.title.length > 0
+)
 
 
 
