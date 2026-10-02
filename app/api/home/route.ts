@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLanguageFromRequest, translateHomeStories } from '@/utils/eira-translate'
+import { getLanguageFromRequest, translateHomeStories } from '@/utils/eira-translate';
 
 type Story = {
   title: string;
@@ -705,7 +705,14 @@ function detectRegion(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const region = detectRegion(request);
-    const language = getLanguageFromRequest(request);
+
+    // Explicit ?lang= is the source of truth; cookie is only a fallback.
+    const requestedLanguage = request.nextUrl.searchParams.get('lang');
+    const language = requestedLanguage === 'ta' || requestedLanguage === 'hi'
+      ? requestedLanguage
+      : requestedLanguage === 'en'
+        ? 'en'
+        : getLanguageFromRequest(request);
 
     // EIRA Home is a current-news product, not a static three-story feed.
     // Build a broad fresh candidate pool on every request, then select the
@@ -839,8 +846,7 @@ export async function GET(request: NextRequest) {
       attachArticleImages(formattedIndia),
       attachArticleImages(formattedWorld),
     ]);
-
-    const [regionalTranslated, indiaTranslated, worldTranslated] = await Promise.all([
+    const [translatedRegional, translatedIndia, translatedWorld] = await Promise.all([
       translateHomeStories(regionalWithImages, language),
       translateHomeStories(indiaWithImages, language),
       translateHomeStories(worldWithImages, language),
@@ -850,15 +856,13 @@ export async function GET(request: NextRequest) {
       {
         region,
         regionCode: Object.entries(STATE_CODES).find(([, name]) => name === region)?.[0] || '',
-        regional: regionalTranslated.slice(0, 3),
-        india: indiaTranslated.slice(0, 3),
-        world: worldTranslated.slice(0, 2),
-        // Additional current candidates are available to the client without
-        // changing the existing Home layout.
+        regional: translatedRegional.slice(0, 3),
+        india: translatedIndia.slice(0, 3),
+        world: translatedWorld.slice(0, 2),
         currentPool: {
-          regional: regionalWithImages,
-          india: indiaWithImages,
-          world: worldWithImages,
+          regional: translatedRegional,
+          india: translatedIndia,
+          world: translatedWorld,
         },
         retrievedAt: new Date().toISOString(),
       },

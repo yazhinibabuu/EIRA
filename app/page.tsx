@@ -22,7 +22,7 @@ import { useEffect, useState } from 'react';
 
 
 
-import { Footer, Nav, SectionLabel } from '@/components/eira';
+import { Nav, Footer, SectionLabel } from '@/components/eira';
 
 
 
@@ -295,6 +295,7 @@ const copy = {
 
 
     understandArrow: 'Understand',
+    brighterTomorrow: 'A brighter\ntomorrow together',
 
 
 
@@ -475,6 +476,7 @@ const copy = {
 
 
     understandArrow: 'புரிந்துகொள்ளுங்கள்',
+    brighterTomorrow: 'ஒன்றாக\nஒரு சிறந்த நாளையை நோக்கி',
 
 
 
@@ -655,6 +657,7 @@ const copy = {
 
 
     understandArrow: 'समझें',
+    brighterTomorrow: 'मिलकर\nएक बेहतर कल की ओर',
 
 
 
@@ -1477,6 +1480,10 @@ export default function Home() {
 
 
 
+      
+      // Send the selected language explicitly so the API translates every Home story.
+      params.set('lang', language);
+
       const response = await fetch(
 
         params.toString()
@@ -1859,9 +1866,11 @@ export default function Home() {
 
 <div className="relative z-10">
 
-          <div className="[&>header>div>a]:!text-white [&>header>div>nav]:!text-white [&>header>div>div]:!text-white [&>header>div>button]:!text-white">
-  <Nav />
-</div>
+          <div className="[&_a]:!text-white [&_button]:!text-white [&_svg]:!text-white">
+
+            <Nav />
+
+          </div>
 
 
 
@@ -1879,15 +1888,15 @@ export default function Home() {
 
 
 
-<h1 className="serif mt-5 text-[34px] leading-[.94] tracking-[-.045em] text-white drop-shadow-[0_3px_18px_rgba(0,0,0,.22)] sm:max-w-[680px] sm:text-[68px] lg:text-[78px]">
-  <span className="block">
-    {ui.headline1}
-  </span>
+                <h1 className="serif mt-5 max-w-[680px] text-[48px] leading-[.94] tracking-[-.055em] text-white drop-shadow-[0_3px_18px_rgba(0,0,0,.22)] sm:text-[68px] lg:text-[78px]">
 
-  <span className="block text-[30px] leading-[.98] sm:text-[68px] sm:leading-[.94] lg:text-[78px]">
-    <i>{ui.headline2}</i>
-  </span>
-</h1>
+                  {ui.headline1}
+
+                  <br />
+
+                  <i>{ui.headline2}</i>
+
+                </h1>
 
 
 
@@ -1937,7 +1946,7 @@ export default function Home() {
 
                   <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-[#e8ad83]/18 blur-3xl" />
 
-                  <div className="relative grid gap-0 md:grid-cols-[1.15fr_.72fr]">
+                  <div className="relative grid min-w-0 gap-0 md:grid-cols-[minmax(0,1.15fr)_minmax(0,.72fr)]">
 
                     <div className="p-6 sm:p-8 lg:p-9">
 
@@ -2031,15 +2040,15 @@ export default function Home() {
 
                       </div>
 
-                      <div className="absolute left-5 top-[58px] max-w-[180px] rounded-full border border-white/20 bg-[#10261d]/55 px-3.5 py-2 shadow-[0_8px_30px_rgba(0,0,0,.16)] backdrop-blur-md">
+                      <div className="absolute left-5 right-5 top-[58px] min-w-0 rounded-2xl border border-white/20 bg-[#10261d]/55 px-3.5 py-2.5 shadow-[0_8px_30px_rgba(0,0,0,.16)] backdrop-blur-md">
 
-                        <div className="flex items-start gap-2">
+                        <div className="flex min-w-0 items-start gap-2">
 
                           <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#d98970]" />
 
-                          <span className="mono text-[8px] font-medium uppercase leading-[1.35] tracking-[.18em] text-[#e6b19b]">
+                          <span className="mono min-w-0 break-words whitespace-pre-line text-[8px] font-medium uppercase leading-[1.4] tracking-[.12em] text-[#e6b19b]">
 
-                            A brighter<br />tomorrow together
+                            {ui.brighterTomorrow}
 
                           </span>
 
@@ -2100,402 +2109,6 @@ export default function Home() {
 
 
 '''
-
-      {/* =====================================================
-
-
-
-          WHAT CHANGED
-
-
-
-          ===================================================== */}
-
-
-
-      <section className="px-5 pt-7 pb-12 sm:px-8 lg:px-10 lg:pt-9 lg:pb-16">
-
-
-
-        <div className="mx-auto max-w-7xl">
-
-
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-
-
-
-            <div>
-
-
-
-              <SectionLabel>
-
-
-
-                {ui.changed}
-
-
-
-              </SectionLabel>
-
-
-
-
-
-
-
-              <h2 className="serif text-4xl tracking-[-.04em] text-[#f5eee4] sm:text-5xl">
-
-
-
-                {ui.startWith}
-
-
-
-              </h2>
-
-
-
-            </div>
-
-
-
-
-
-
-
-            <Link
-
-
-
-              href="/explore"
-
-
-
-              className="inline-flex items-center gap-1 text-sm text-[#e6c79f]"
-
-
-
-            >
-
-
-
-              {ui.seeMore}
-
-
-
-              <ChevronRight size={15} />
-
-
-
-            </Link>
-
-
-
-          </div>
-
-
-
-
-
-
-
-          <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-
-
-
-            <Link
-
-
-
-              href={`/catch-up?topic=${encodeURIComponent(
-
-
-
-                region
-
-
-
-              )}`}
-
-
-
-              className="rounded-[22px] border border-white/10 bg-[#19372d] p-5 transition hover:bg-[#1d4035]"
-
-
-
-            >
-
-
-
-              <p className="mono text-[9px] uppercase tracking-[.18em] text-[#e2a96f]">
-
-
-
-                {ui.startHere}
-
-
-
-              </p>
-
-
-
-
-
-
-
-              <h3 className="serif mt-3 text-2xl text-white">
-
-
-
-                {ui.catchUp}
-
-
-
-              </h3>
-
-
-
-
-
-
-
-              <p className="mt-2 text-sm leading-6 text-[#c2c7c2]">
-
-
-
-                {ui.catchUpDesc}
-
-
-
-              </p>
-
-
-
-            </Link>
-
-
-
-
-
-
-
-            <Link
-
-
-
-              href="/ask"
-
-
-
-              className="rounded-[22px] border border-white/10 bg-[#19372d] p-5 transition hover:bg-[#1d4035]"
-
-
-
-            >
-
-
-
-              <p className="mono text-[9px] uppercase tracking-[.18em] text-[#e2a96f]">
-
-
-
-                {ui.explain}
-
-
-
-              </p>
-
-
-
-
-
-
-
-              <h3 className="serif mt-3 text-2xl text-white">
-
-
-
-                {ui.explain}
-
-
-
-              </h3>
-
-
-
-
-
-
-
-              <p className="mt-2 text-sm leading-6 text-[#c2c7c2]">
-
-
-
-                {ui.explainDesc}
-
-
-
-              </p>
-
-
-
-            </Link>
-
-
-
-
-
-
-
-            <Link
-
-
-
-              href="/explore"
-
-
-
-              className="rounded-[22px] border border-white/10 bg-[#19372d] p-5 transition hover:bg-[#1d4035]"
-
-
-
-            >
-
-
-
-              <p className="mono text-[9px] uppercase tracking-[.18em] text-[#e2a96f]">
-
-
-
-                {ui.views}
-
-
-
-              </p>
-
-
-
-
-
-
-
-              <h3 className="serif mt-3 text-2xl text-white">
-
-
-
-                {ui.views}
-
-
-
-              </h3>
-
-
-
-
-
-
-
-              <p className="mt-2 text-sm leading-6 text-[#c2c7c2]">
-
-
-
-                {ui.viewsDesc}
-
-
-
-              </p>
-
-
-
-            </Link>
-
-
-
-
-
-
-
-            <Link
-
-
-
-              href="/explore"
-
-
-
-              className="rounded-[22px] border border-white/10 bg-[#19372d] p-5 transition hover:bg-[#1d4035]"
-
-
-
-            >
-
-
-
-              <p className="mono text-[9px] uppercase tracking-[.18em] text-[#e2a96f]">
-
-
-
-                {ui.deeper}
-
-
-
-              </p>
-
-
-
-
-
-
-
-              <h3 className="serif mt-3 text-2xl text-white">
-
-
-
-                {ui.deeper}
-
-
-
-              </h3>
-
-
-
-
-
-
-
-              <p className="mt-2 text-sm leading-6 text-[#c2c7c2]">
-
-
-
-                {ui.deeperDesc}
-
-
-
-              </p>
-
-
-
-            </Link>
-
-
-
-          </div>
-
-
-
-        </div>
-
-
-
-      </section>
-
-
-
-
-
-
 
       {/* =====================================================
 
