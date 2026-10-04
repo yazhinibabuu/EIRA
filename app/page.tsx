@@ -744,6 +744,14 @@ function formatDate(value: string) {
 
 }
 
+function formatTodayDate() {
+  return new Date().toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 
 
 
@@ -1960,7 +1968,7 @@ export default function Home() {
 
                         <span className="mono text-[9px] uppercase tracking-wider text-white/60">
 
-                          {hero.source} · {formatDate(hero.publishedAt)}
+                          {hero.source} · {formatTodayDate()}
 
                         </span>
 
