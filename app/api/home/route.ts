@@ -8,6 +8,7 @@ type Story = {
   description: string;
   url: string;
   image: string;
+  topic?: string;
 };
 
 const STATE_CODES: Record<string, string> = {
@@ -57,8 +58,9 @@ const IMPORTANCE_GROUPS: Array<{ terms: string[]; points: number; topic: string 
   { topic: 'economy', points: 9, terms: ['economy','inflation','rbi','interest rate','market','trade','tariff','investment','jobs','employment','tax','budget','exports','imports'] },
   { topic: 'infrastructure', points: 8, terms: ['infrastructure','railway','railways','metro','airport','highway','road project','bridge','port','power','energy','water project','sewer','sewage'] },
   { topic: 'health', points: 8, terms: ['health','hospital','outbreak','epidemic','disease','virus','vaccination','vaccine','public health'] },
+  { topic: 'technology', points: 8, terms: ['technology','tech','artificial intelligence','ai','semiconductor','chip','software','cybersecurity','cyber security','data center','data centre','startup','space','satellite'] },
   { topic: 'education', points: 6, terms: ['education','school','schools','university','universities','exam','students','college','neet'] },
-  { topic: 'business', points: 6, terms: ['company','business','merger','acquisition','startup','industry','factory','manufacturing','layoff','ipo'] },
+  { topic: 'business', points: 6, terms: ['company','business','merger','acquisition','industry','factory','manufacturing','layoff','ipo','investment','jobs'] },
   { topic: 'weather', points: 2, terms: ['rain','rainfall','showers','weather','heatwave','temperature','thunderstorm','wind'] },
 ];
 
@@ -170,8 +172,8 @@ function isUsableImageUrl(value: string) {
       host === 'news.google.com' ||
       host.endsWith('.google.com') ||
       host === 'google.com' ||
-      host.endsWith('.googleusercontent.com') ||
-      host.endsWith('.gstatic.com') ||
+      (host.endsWith('.googleusercontent.com') && !path.includes('encrypted-tbn')) ||
+      (host.endsWith('.gstatic.com') && !path.includes('encrypted-tbn')) ||
       path.includes('/images/srpr/logo') ||
       path.includes('google-logo') ||
       path.includes('google_news')
@@ -192,6 +194,7 @@ function extractImageUrl(item: string) {
     item.match(/<(?:media:content|media:thumbnail)[^>]*\burl=["']([^"']+)["']/i)?.[1],
     item.match(/<enclosure[^>]*\burl=["']([^"']+)["'][^>]*\btype=["']image\/[^"]+["']/i)?.[1],
     item.match(/<img[^>]*\bsrc=["']([^"']+)["']/i)?.[1],
+    item.match(/<description>[\s\S]*?<img[^>]*\bsrc=["']([^"']+)["']/i)?.[1],
   ];
 
   for (const candidate of candidates) {
@@ -218,11 +221,19 @@ function cleanDescription(description: string, title: string, source: string) {
 
 async function fetchGoogleNews(query: string): Promise<Story[]> {
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-IN&gl=IN&ceid=IN:en`;
-  const response = await fetch(url, { cache: 'no-store', headers: { 'User-Agent': 'EIRA/1.0' } });
-  if (!response.ok) throw new Error(`News source returned ${response.status}.`);
-  const xml = await response.text();
-  const items = xml.match(/<item>[\s\S]*?<\/item>/gi) ?? [];
-  return items.map((item): Story => {
+  try {
+    const response = await fetch(url, {
+      cache: 'no-store',
+      headers: { 'User-Agent': 'EIRA/1.0' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) {
+      console.error(`EIRA News source returned ${response.status} for query:`, query);
+      return [];
+    }
+    const xml = await response.text();
+    const items = xml.match(/<item>[\s\S]*?<\/item>/gi) ?? [];
+    return items.map((item): Story => {
     const rawTitle = extract('title', item);
     const source = sourceFromTitle(rawTitle);
     const title = headlineWithoutSource(rawTitle);
@@ -234,7 +245,11 @@ async function fetchGoogleNews(query: string): Promise<Story[]> {
       url: extract('link', item),
       image: extractImageUrl(item),
     };
-  }).filter((story) => story.title && story.url);
+    }).filter((story) => story.title && story.url);
+  } catch (error) {
+    console.error('EIRA Google News fetch failed:', query, error);
+    return [];
+  }
 }
 
 async function fetchArticleImage(url: string) {
@@ -321,59 +336,59 @@ async function fetchArticleImage(url: string) {
 
   return '';
 }
-
-async function fetchSearchImage(story: Story) {
+async function fetchBingNewsImage(story: Story) {
   const query = `${story.title} ${story.source}`.trim();
   if (!query) return '';
 
   try {
-    const searchUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(query)}`;
+    const searchUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&qft=interval%3d%221%22&format=RSS`;
     const response = await fetch(searchUrl, {
       cache: 'no-store',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/154 Safari/537.36 EIRA/1.0',
-        'Accept': 'text/html,application/xhtml+xml',
+        'Accept': 'application/rss+xml, application/xml, text/xml',
         'Accept-Language': 'en-IN,en;q=0.9',
       },
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(4500),
     });
     if (!response.ok) return '';
 
-    const html = await response.text();
-    const candidates = new Set<string>();
+    const xml = await response.text();
+    const items = xml.match(/<item>[\s\S]*?<\/item>/gi) ?? [];
+    const targetWords = story.title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((word) => word.length > 2);
 
-    // Google Images embeds source image URLs in several JSON/HTML forms.
-    const patterns = [
-      /https?:\\?\/\\?\/[^"'\\\s<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^"'\\\s<>]*)?/gi,
-      /https?:\/\/[^"'\s<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^"'\s<>]*)?/gi,
-    ];
+    let bestImage = '';
+    let bestScore = 0;
 
-    for (const pattern of patterns) {
-      for (const match of html.matchAll(pattern)) {
-        const raw = match[0]
-          .replace(/\\\//g, '/')
-          .replace(/\\u003d/g, '=')
-          .replace(/\\u0026/g, '&')
-          .replace(/\\u003f/g, '?');
-        if (isUsableImageUrl(raw)) candidates.add(raw);
-        if (candidates.size >= 12) break;
+    for (const item of items.slice(0, 8)) {
+      const rawTitle = extract('title', item);
+      const imageMatch =
+        item.match(/<News:Image[^>]*>([\s\S]*?)<\/News:Image>/i)
+        ?? item.match(/<(?:media:content|media:thumbnail)[^>]*\burl=["']([^"']+)["']/i)
+        ?? item.match(/<img[^>]*\bsrc=["']([^"']+)["']/i);
+      const image = imageMatch ? decodeXml(stripHtml(imageMatch[1])).trim() : '';
+      if (!isUsableImageUrl(image)) continue;
+
+      const resultWords = new Set(
+        rawTitle.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((word) => word.length > 2)
+      );
+      const overlap = targetWords.filter((word) => resultWords.has(word)).length;
+      const score = overlap / Math.max(1, targetWords.length);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestImage = image;
       }
-      if (candidates.size >= 12) break;
     }
 
-    // Prefer non-Google-hosted images. Google thumbnails are often generic
-    // placeholders and are not useful as story artwork.
-    for (const candidate of candidates) {
-      try {
-        const host = new URL(candidate).hostname.toLowerCase();
-        if (!host.includes('google.') && !host.includes('gstatic.') && !host.includes('googleusercontent.')) {
-          return candidate;
-        }
-      } catch {}
-    }
-  } catch {}
-
-  return '';
+    return bestImage;
+  } catch {
+    return '';
+  }
 }
 
 async function attachArticleImages(stories: Story[]) {
@@ -384,12 +399,109 @@ async function attachArticleImages(stories: Story[]) {
     const articleImage = await fetchArticleImage(story.url);
     if (articleImage) return { ...story, image: articleImage };
 
-    // Last-resort editorial image lookup. This is only used when the publisher
-    // blocks metadata fetching, so cards never fall back to a generic Google
-    // placeholder. The query is the actual story headline + source.
-    const searchImage = await fetchSearchImage(story);
-    return { ...story, image: searchImage };
+    const bingImage = await fetchBingNewsImage(story);
+    return { ...story, image: bingImage };
   }));
+}
+
+async function enrichStoryContext(story: Story): Promise<Story> {
+  if (!story.url) return story;
+  try {
+    const response = await fetch(story.url, {
+      cache: 'no-store',
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/154 Safari/537.36 EIRA/1.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-IN,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!response.ok) return story;
+    const html = (await response.text()).slice(0, 700000);
+    const patterns = [
+      /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i,
+      /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i,
+    ];
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      const description = match?.[1] ? stripHtml(decodeXml(match[1])) : '';
+      if (description && description.length >= 40 && !description.toLowerCase().includes('javascript')) {
+        return { ...story, description: description.slice(0, 500) };
+      }
+    }
+  } catch {}
+  return story;
+}
+
+async function editorializeHomeStories(stories: Story[]): Promise<Story[]> {
+  if (!stories.length) return stories;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return stories;
+  const model = process.env.EIRA_EDITORIAL_MODEL || process.env.EIRA_TRANSLATION_MODEL || 'gemini-3.5-flash-lite';
+  const input = stories.map((story, index) => ({
+    id: index,
+    headline: story.title,
+    description: story.description,
+    source: story.source,
+    topic: classifyTopic(story),
+  }));
+  const prompt = `You are EIRA's senior news editor. Rewrite these current news items for a calm, trustworthy information product.
+
+For each item return exactly: {"id": number, "title": string, "description": string}.
+
+TITLE rules:
+- Aim for 55 to 90 characters when possible; never force awkward clipping.
+- One clear sentence, written in EIRA's calm editorial voice rather than copied RSS style.
+- Remove publisher clickbait, SEO wording, quotes unless essential, source suffixes, and headline fragments.
+- Distinguish a site/location change from cancellation of an entire project. Never say a project was cancelled if the supplied reporting only says a proposed site was dropped.
+- Do not invent facts, people, numbers, causes, motives, or consequences.
+- Preserve the actual event and important names.
+
+DESCRIPTION rules:
+- 1 or 2 sentences, about 25-45 words.
+- Start with what actually happened, based only on the supplied headline/description.
+- Do not add why it matters unless the supplied reporting supports it.
+- Never invent missing details. If the source material is thin, write a concise factual restatement rather than guessing.
+- Natural, neutral journalism. No hype.
+
+INPUT:
+${JSON.stringify(input)}`;
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(9000),
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'ARRAY',
+            items: { type: 'OBJECT', properties: { id: { type: 'INTEGER' }, title: { type: 'STRING' }, description: { type: 'STRING' } }, required: ['id','title','description'] },
+          },
+        },
+      }),
+    });
+    if (!response.ok) return stories;
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || '').join('') || '';
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) return stories;
+    return stories.map((story, index) => {
+      const item = parsed.find((candidate: any) => Number(candidate?.id) === index);
+      if (!item || typeof item.title !== 'string' || typeof item.description !== 'string') return story;
+      const editorialTitle = cleanHeadline(item.title).trim();
+      return { ...story, title: shortenHeadline(editorialTitle, 96), description: stripHtml(item.description).trim() };
+    });
+  } catch (error) {
+    console.error('EIRA editorial enrichment failed:', error);
+    return stories;
+  }
 }
 
 function normalizeToken(token: string) {
@@ -469,7 +581,7 @@ function isAnalysisHeadline(story: Story) {
 }
 
 const PRIMARY_FRESH_HOURS = 24;
-const MAX_HOME_AGE_HOURS = 36;
+const MAX_HOME_AGE_HOURS = 48;
 
 function isCurrentHomeStory(story: Story) {
   return hoursOld(story.publishedAt) <= MAX_HOME_AGE_HOURS;
@@ -507,17 +619,24 @@ function isRoundup(story: Story) {
 
 function classifyTopic(story: Story) {
   const text = storyText(story).toLowerCase();
+  const rules: Array<[string, Array<[string, number]>]> = [
+    ['courts', [['supreme court', 12], ['high court', 12], ['court ruling', 10], ['court order', 10], ['judgment', 9], ['judgement', 9], ['verdict', 9], ['legal challenge', 8], ['court directs', 10], ['court asks', 10], ['court seeks', 10]]],
+    ['health', [['hospital', 9], ['doctor', 7], ['patient', 7], ['disease', 8], ['virus', 8], ['outbreak', 9], ['epidemic', 9], ['vaccination', 8], ['vaccine', 8], ['medical', 7], ['healthcare', 8], ['health ministry', 10], ['drug', 7], ['medicine', 7], ['cardiac', 9]]],
+    ['infrastructure', [['infrastructure', 9], ['railway', 9], ['railways', 9], ['metro', 9], ['airport', 10], ['highway', 9], ['road project', 10], ['bridge', 9], ['port', 10], ['container', 7], ['power', 8], ['energy', 7], ['water project', 9], ['sewer', 8], ['sewage', 8], ['transport', 7]]],
+    ['technology', [['artificial intelligence', 10], ['ai', 7], ['semiconductor', 10], ['chip', 10], ['chips', 10], ['software', 9], ['cybersecurity', 10], ['cyber security', 10], ['data center', 9], ['data centre', 9], ['technology', 5], ['tech company', 8], ['startup', 7], ['space', 7], ['satellite', 8]]],
+    ['economy', [['economy', 10], ['inflation', 9], ['rbi', 9], ['interest rate', 9], ['market', 7], ['markets', 7], ['trade', 7], ['tariff', 8], ['investment', 6], ['jobs', 6], ['employment', 6], ['tax', 8], ['budget', 8], ['exports', 7], ['imports', 7], ['growth', 8]]],
+    ['business', [['company', 8], ['companies', 8], ['business', 8], ['businesses', 8], ['merger', 9], ['acquisition', 9], ['ipo', 9], ['investor', 7], ['investors', 7], ['stock', 7], ['stocks', 7], ['shares', 7], ['revenue', 8], ['profit', 8], ['earnings', 8], ['manufacturing', 7], ['industry', 7], ['factory', 7]]],
+    ['education', [['education', 9], ['school', 8], ['schools', 8], ['university', 9], ['universities', 9], ['exam', 8], ['students', 7], ['college', 8], ['neet', 9]]],
+    ['government', [['government approves', 10], ['government orders', 10], ['government announces', 10], ['chief minister', 10], ['prime minister', 10], ['minister announces', 9], ['cabinet approves', 10], ['cabinet decision', 10], ['ministry orders', 10], ['new policy', 9], ['policy takes effect', 9], ['bill passed', 9], ['law comes into effect', 9], ['regulation comes into effect', 9], ['parliament passes', 10]]],
+    ['public-safety', [['police', 8], ['crime', 8], ['attack', 9], ['explosion', 9], ['accident', 8], ['fire', 8], ['rescue', 8], ['missing', 7], ['security', 7], ['terror', 10], ['pocso', 10], ['rape', 10], ['sexual assault', 10]]],
+    ['disaster', [['flood', 10], ['flooding', 10], ['cyclone', 10], ['earthquake', 10], ['landslide', 10], ['tsunami', 10], ['evacuation', 9], ['evacuated', 9], ['red alert', 10], ['orange alert', 10], ['disaster', 9], ['extreme rain', 9], ['heavy rain', 8], ['severe weather', 9]]],
+    ['weather', [['rainfall', 6], ['showers', 6], ['weather', 7], ['heatwave', 8], ['temperature', 6], ['thunderstorm', 7], ['wind', 5]]],
+  ];
   let bestTopic = 'general';
-  let bestPoints = 0;
-  for (const group of IMPORTANCE_GROUPS) {
-    const hits = group.terms.filter((term) => text.includes(term)).length;
-    if (hits > 0) {
-      const score = group.points + Math.min(hits - 1, 3) * 2;
-      if (score > bestPoints) {
-        bestPoints = score;
-        bestTopic = group.topic;
-      }
-    }
+  let bestScore = 0;
+  for (const [topic, terms] of rules) {
+    const score = terms.reduce((sum, [term, weight]) => sum + (text.includes(term) ? weight : 0), 0);
+    if (score > bestScore) { bestScore = score; bestTopic = topic; }
   }
   return bestTopic;
 }
@@ -595,20 +714,32 @@ function eventScore(story: Story) {
 }
 
 function rankRegional(stories: Story[], region: string) {
+  const regionTerms = (REGION_TERMS[region] || [region]).map((term) => term.toLowerCase());
+  const specificPlaceTerms = regionTerms.filter((term) => term !== region.toLowerCase());
+
   return dedupe(stories)
     .filter((story) => !isRoundup(story) && isCurrentHomeStory(story) && !isLowQualitySource(story.source))
     .map((story) => {
       const relevance = regionalRelevance(story, region);
+      const title = story.title.toLowerCase();
+      const description = story.description.toLowerCase();
+      const hasTitleRegion = relevance.titleHits > 0;
+      const specificBodyHits = specificPlaceTerms.filter((term) => description.includes(term)).length;
+      const specificTitleHits = specificPlaceTerms.filter((term) => title.includes(term)).length;
+      const isClearlyRegional = hasTitleRegion || specificTitleHits > 0 || specificBodyHits >= 2;
+
       let score = eventScore(story) + relevance.score;
 
+      if (!isClearlyRegional) score -= 80;
       if (relevance.titleHits === 0) score -= 22;
       if (relevance.titleHits === 0 && relevance.bodyHits === 0) score -= 40;
       if (isAnalysisHeadline(story)) score -= 10;
       if (LOW_VALUE_TERMS.some((term) => storyText(story).toLowerCase().includes(term))) score -= 8;
       if (sourceQuality(story.source) >= 3) score += 3;
 
-      return { story, score };
+      return { story, score, isClearlyRegional };
     })
+    .filter((item) => item.isClearlyRegional)
     .sort((a, b) => b.score - a.score)
     .map((item) => item.story);
 }
@@ -643,6 +774,7 @@ function rankWorld(stories: Story[]) {
       for (const term of worldTerms) if (text.includes(term)) score += 3;
       const hasWorldSignal = worldTerms.some((term) => text.includes(term));
       const hasIndiaSignal = indiaOnlyTerms.some((term) => text.includes(term));
+      if (!hasWorldSignal) score -= 80;
       if (hasIndiaSignal && !hasWorldSignal) score -= 30;
       if (isAnalysisHeadline(story)) score -= 10;
       if (isLowQualitySource(story.source)) score -= 15;
@@ -655,28 +787,49 @@ function rankWorld(stories: Story[]) {
 
 function selectUnique(candidates: Story[], limit: number, alreadyShown: Story[] = []) {
   const selected: Story[] = [];
-  const topics = new Set<string>();
-
   for (const story of candidates) {
     if (isRoundup(story)) continue;
     if (alreadyShown.some((existing) => similarity(existing, story) >= 0.68)) continue;
     if (selected.some((existing) => similarity(existing, story) >= 0.68)) continue;
-
-    // Preserve the ranking order. Topic diversity is only a tie-breaker:
-    // importance must never be sacrificed just to make the cards look varied.
-    const topic = classifyTopic(story);
-    if (topics.has(topic) && selected.length < limit - 1) {
-      const laterAlternative = candidates.slice(candidates.indexOf(story) + 1).find((candidate) => {
-        if (classifyTopic(candidate) === topic) return false;
-        if (alreadyShown.some((existing) => similarity(existing, candidate) >= 0.68)) return false;
-        return !selected.some((existing) => similarity(existing, candidate) >= 0.68);
-      });
-      if (laterAlternative) continue;
-    }
-
     selected.push(story);
-    topics.add(topic);
     if (selected.length >= limit) break;
+  }
+  return selected;
+}
+
+function selectWithTopicCoverage(
+  candidates: Story[],
+  limit: number,
+  preferredTopics: string[],
+  alreadyShown: Story[] = []
+) {
+  const eligible = candidates.filter((story) =>
+    !isRoundup(story) &&
+    !alreadyShown.some((existing) => similarity(existing, story) >= 0.68)
+  );
+
+  const selected: Story[] = [];
+  const usedTopics = new Set<string>();
+
+  // First pass: deliberately reserve slots for different important beats.
+  for (const topic of preferredTopics) {
+    if (selected.length >= limit) break;
+    const candidate = eligible.find((story) =>
+      !usedTopics.has(classifyTopic(story)) && classifyTopic(story) === topic &&
+      !selected.some((existing) => similarity(existing, story) >= 0.68)
+    );
+    if (candidate) {
+      selected.push(candidate);
+      usedTopics.add(classifyTopic(candidate));
+    }
+  }
+
+  // Second pass: fill remaining slots by editorial score.
+  for (const story of eligible) {
+    if (selected.length >= limit) break;
+    if (selected.some((existing) => similarity(existing, story) >= 0.68)) continue;
+    selected.push(story);
+    usedTopics.add(classifyTopic(story));
   }
 
   return selected;
@@ -705,8 +858,6 @@ function detectRegion(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const region = detectRegion(request);
-
-    // Explicit ?lang= is the source of truth; cookie is only a fallback.
     const requestedLanguage = request.nextUrl.searchParams.get('lang');
     const language = requestedLanguage === 'ta' || requestedLanguage === 'hi'
       ? requestedLanguage
@@ -714,151 +865,122 @@ export async function GET(request: NextRequest) {
         ? 'en'
         : getLanguageFromRequest(request);
 
-    // EIRA Home is a current-news product, not a static three-story feed.
-    // Build a broad fresh candidate pool on every request, then select the
-    // most consequential distinct events for each geography.
-    //
-    // We deliberately query multiple beats because a single "latest news"
-    // query can repeatedly surface the same dominant story (for example,
-    // the flydubai pilot story) while missing other important developments.
-    const regionalFreshQueries = region !== 'India'
+    // EIRA Home is deliberately built in three editorial layers.
+    // We retrieve by beat, rank within the beat, guarantee topic coverage,
+    // then translate/image-enrich only the stories the UI will actually show.
+    const regionalQueries = region !== 'India'
       ? [
-          `"${region}" latest news when:1d`,
-          `"${region}" government court policy when:1d`,
-          `"${region}" business economy industry when:1d`,
-          `"${region}" health education transport infrastructure when:1d`,
-          `"${region}" rain weather disaster warning when:1d`,
-          `"${region}" crime police accident court when:1d`,
-          `"${region}" latest when:1d`,
+          `"${region}" government court policy latest when:2d`,
+          `"${region}" business economy industry jobs latest when:2d`,
+          `"${region}" health education latest when:2d`,
+          `"${region}" infrastructure transport power railway latest when:2d`,
+          `"${region}" rain weather disaster warning latest when:2d`,
+          `"${region}" police crime accident latest when:2d`,
+          `"${region}" technology startup science latest when:2d`,
+          `"${region}" latest major development when:2d`,
         ]
-      : [
-          'India latest news when:1d',
-          'India government court policy when:1d',
-          'India business economy industry when:1d',
-          'India health education transport infrastructure when:1d',
-        ];
+      : [];
 
-    const regionalFallbackQueries = region !== 'India'
-      ? [
-          `"${region}" latest news when:2d`,
-          `"${region}" government court business when:2d`,
-          `"${region}" infrastructure health education transport when:2d`,
-          `"${region}" weather disaster police court when:2d`,
-        ]
-      : [
-          'India latest news when:2d',
-          'India government court economy business when:2d',
-          'India infrastructure health education policy when:2d',
-        ];
-
-    const indiaFreshQueries = [
-      'India latest news when:1d',
-      'India government court policy when:1d',
-      'India economy business markets when:1d',
-      'India health education transport infrastructure when:1d',
-      'India security disaster weather when:1d',
-      'India technology science major development when:1d',
+    const indiaQueries = [
+      'India government court policy latest when:2d',
+      'India economy business markets jobs latest when:2d',
+      'India technology AI science cybersecurity semiconductor latest when:2d',
+      'India health education latest when:2d',
+      'India infrastructure transport energy railway latest when:2d',
+      'India security disaster weather latest when:2d',
     ];
 
-    const indiaFallbackQueries = [
-      'India latest news when:2d',
-      'India government court economy business when:2d',
-      'India infrastructure health education policy when:2d',
-    ];
-
-    const worldFreshQueries = [
-      'world latest news when:1d',
-      'global economy markets business when:1d',
-      'United States China Europe Middle East latest when:1d',
-      'world conflict security diplomacy court when:1d',
-      'world disaster health science technology when:1d',
-    ];
-
-    const worldFallbackQueries = [
-      'world latest news when:2d',
-      'world economy security disaster court when:2d',
+    const worldQueries = [
+      'world geopolitics government diplomacy conflict latest when:2d',
+      'global economy business markets trade latest when:2d',
+      'world technology AI science cybersecurity latest when:2d',
+      'world health climate disaster latest when:2d',
       'United States China Europe Middle East latest when:2d',
     ];
 
-    const [
-      regionalFreshSets,
-      regionalFallbackSets,
-      indiaFreshSets,
-      indiaFallbackSets,
-      worldFreshSets,
-      worldFallbackSets,
-    ] = await Promise.all([
-      Promise.all(regionalFreshQueries.map(fetchGoogleNews)),
-      Promise.all(regionalFallbackQueries.map(fetchGoogleNews)),
-      Promise.all(indiaFreshQueries.map(fetchGoogleNews)),
-      Promise.all(indiaFallbackQueries.map(fetchGoogleNews)),
-      Promise.all(worldFreshQueries.map(fetchGoogleNews)),
-      Promise.all(worldFallbackQueries.map(fetchGoogleNews)),
+    const [regionalSets, indiaSets, worldSets] = await Promise.all([
+      Promise.all(regionalQueries.map(fetchGoogleNews)),
+      Promise.all(indiaQueries.map(fetchGoogleNews)),
+      Promise.all(worldQueries.map(fetchGoogleNews)),
     ]);
 
-    const freshOnly = (stories: Story[]) =>
-      dedupe(stories).filter(isPrimaryFreshStory);
+    const freshEnough = (stories: Story[]) =>
+      dedupe(stories).filter(isCurrentHomeStory).filter((story) => !isRoundup(story));
 
-    const fallbackOnly = (stories: Story[], fresh: Story[]) =>
-      dedupe(stories)
-        .filter(isCurrentHomeStory)
-        .filter((story) => !fresh.some((existing) => similarity(existing, story) >= 0.68));
+    const emergencyPool = (stories: Story[]) =>
+      dedupe(stories).filter((story) => hoursOld(story.publishedAt) <= 72).filter((story) => !isRoundup(story));
 
-    const regionalFreshRaw = freshOnly(regionalFreshSets.flat());
-    const regionalFallbackRaw = fallbackOnly(regionalFallbackSets.flat(), regionalFreshRaw);
+    const regionalAll = regionalSets.flat();
+    const indiaAll = indiaSets.flat();
+    const worldAll = worldSets.flat();
 
-    const indiaFreshRaw = freshOnly(indiaFreshSets.flat());
-    const indiaFallbackRaw = fallbackOnly(indiaFallbackSets.flat(), indiaFreshRaw);
+    const regionalRaw = freshEnough(regionalAll);
+    const indiaRaw = freshEnough(indiaAll);
+    const worldRaw = freshEnough(worldAll);
 
-    const worldFreshRaw = freshOnly(worldFreshSets.flat());
-    const worldFallbackRaw = fallbackOnly(worldFallbackSets.flat(), worldFreshRaw);
+    // If a feed has a transient timestamp/feed issue, do not punish the user
+    // with an empty Home. Use a clearly bounded 72-hour emergency pool.
+    const regionalSource = regionalRaw.length ? regionalRaw : emergencyPool(regionalAll);
+    const indiaSource = indiaRaw.length ? indiaRaw : emergencyPool(indiaAll);
+    const worldSource = worldRaw.length ? worldRaw : emergencyPool(worldAll);
 
-    const rankedRegionalFresh = region === 'India' ? [] : rankRegional(regionalFreshRaw, region);
-    const rankedRegionalFallback = region === 'India' ? [] : rankRegional(regionalFallbackRaw, region);
-    const rankedIndiaFresh = rankIndia(indiaFreshRaw);
-    const rankedIndiaFallback = rankIndia(indiaFallbackRaw);
-    const rankedWorldFresh = rankWorld(worldFreshRaw);
-    const rankedWorldFallback = rankWorld(worldFallbackRaw);
+    const rankedRegional = region === 'India' ? [] : rankRegional(regionalSource, region);
+    const rankedIndia = rankIndia(indiaSource);
+    const rankedWorld = rankWorld(worldSource);
 
-    // Select a larger candidate set first, then de-duplicate by underlying
-    // event. This prevents one viral story from occupying every slot.
-    const regional = selectUnique(rankedRegionalFresh, 6);
-    const regionalCompleted = regional.length < 6
-      ? [...regional, ...selectUnique(rankedRegionalFallback, 6 - regional.length, regional)]
-      : regional;
+    const regionalSelected = region === 'India'
+      ? []
+      : selectWithTopicCoverage(
+          rankedRegional,
+          6,
+          ['government', 'courts', 'infrastructure', 'economy', 'business', 'technology', 'health', 'education', 'disaster', 'public-safety']
+        );
 
-    const india = selectUnique(rankedIndiaFresh, 6, regionalCompleted);
-    const indiaCompleted = india.length < 6
-      ? [...india, ...selectUnique(rankedIndiaFallback, 6 - india.length, [...regionalCompleted, ...india])]
-      : india;
+    const indiaSelected = selectWithTopicCoverage(
+      rankedIndia,
+      6,
+      ['government', 'courts', 'economy', 'technology', 'health', 'infrastructure', 'public-safety', 'education'],
+      regionalSelected
+    );
 
-    const world = selectUnique(rankedWorldFresh, 6, [...regionalCompleted, ...indiaCompleted]);
-    const worldCompleted = world.length < 6
-      ? [...world, ...selectUnique(rankedWorldFallback, 6 - world.length, [...regionalCompleted, ...indiaCompleted, ...world])]
-      : world;
+    const worldSelected = selectWithTopicCoverage(
+      rankedWorld,
+      5,
+      ['government', 'economy', 'technology', 'public-safety', 'health', 'disaster', 'infrastructure'],
+      [...regionalSelected, ...indiaSelected]
+    );
 
-    const formattedRegional = regionalCompleted.map((story) => ({ ...story, title: shortenHeadline(story.title, 165) }));
-    const formattedIndia = indiaCompleted.map((story) => ({ ...story, title: shortenHeadline(story.title, 150) }));
-    const formattedWorld = worldCompleted.map((story) => ({ ...story, title: shortenHeadline(story.title, 150) }));
+    // Only the cards that can actually be rendered are enriched. This avoids
+    // making 20+ image requests and 20+ translation strings on every switch.
+    const regionalForUi = regionalSelected.slice(0, 3).map((story) => ({ ...story, topic: classifyTopic(story) }));
+    const indiaForUi = indiaSelected.slice(0, 3).map((story) => ({ ...story, topic: classifyTopic(story) }));
+    const worldForUi = worldSelected.slice(0, 2).map((story) => ({ ...story, topic: classifyTopic(story) }));
 
-    const [regionalWithImages, indiaWithImages, worldWithImages] = await Promise.all([
-      attachArticleImages(formattedRegional),
-      attachArticleImages(formattedIndia),
-      attachArticleImages(formattedWorld),
+    const contextEnriched = await Promise.all([
+      ...regionalForUi.map(enrichStoryContext),
+      ...indiaForUi.map(enrichStoryContext),
+      ...worldForUi.map(enrichStoryContext),
     ]);
+    const editorialized = await editorializeHomeStories(contextEnriched);
+    const regionalEditorial = editorialized.slice(0, regionalForUi.length);
+    const indiaEditorial = editorialized.slice(regionalForUi.length, regionalForUi.length + indiaForUi.length);
+    const worldEditorial = editorialized.slice(regionalForUi.length + indiaForUi.length);
+
+    // Home is typography-first when a real publisher image is unavailable.
+    // Never manufacture a visual placeholder just to fill a rectangle.
     const [translatedRegional, translatedIndia, translatedWorld] = await Promise.all([
-      translateHomeStories(regionalWithImages, language),
-      translateHomeStories(indiaWithImages, language),
-      translateHomeStories(worldWithImages, language),
+      translateHomeStories(regionalEditorial, language),
+      translateHomeStories(indiaEditorial, language),
+      translateHomeStories(worldEditorial, language),
     ]);
 
     return NextResponse.json(
       {
         region,
         regionCode: Object.entries(STATE_CODES).find(([, name]) => name === region)?.[0] || '',
-        regional: translatedRegional.slice(0, 3),
-        india: translatedIndia.slice(0, 3),
-        world: translatedWorld.slice(0, 2),
+        regional: translatedRegional,
+        india: translatedIndia,
+        world: translatedWorld,
         currentPool: {
           regional: translatedRegional,
           india: translatedIndia,
@@ -866,7 +988,7 @@ export async function GET(request: NextRequest) {
         },
         retrievedAt: new Date().toISOString(),
       },
-      { headers: { 'Cache-Control': 'no-store' } }
+      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=900' } }
     );
   } catch (error) {
     console.error('EIRA Home API error:', error);

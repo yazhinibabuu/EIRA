@@ -10,11 +10,11 @@ import Link from 'next/link';
 
 
 
-import { ArrowRight, ChevronRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 
 
@@ -71,6 +71,7 @@ type HomeStory = {
 
 
   image: string;
+  topic?: string;
 
 
 
@@ -111,6 +112,7 @@ type HomeResponse = {
 
 
   error?: string;
+  currentPool?: { regional: HomeStory[]; india: HomeStory[]; world: HomeStory[] };
 
 
 
@@ -131,6 +133,10 @@ const copy = {
 
 
     kicker: 'Understand what’s happening',
+
+    greeting: 'Good morning.',
+    subtitle: 'Here’s what changed while you were away.',
+    topics: ['All', 'Tamil Nadu', 'India', 'World', 'Business', 'Technology', 'Health'],
 
 
 
@@ -295,6 +301,7 @@ const copy = {
 
 
     understandArrow: 'Understand',
+    whatHappened: 'What happened',
     brighterTomorrow: 'A brighter\ntomorrow together',
 
 
@@ -312,6 +319,10 @@ const copy = {
 
 
     kicker: 'என்ன நடக்கிறது என்பதைப் புரிந்துகொள்ளுங்கள்',
+
+    greeting: 'காலை வணக்கம்.',
+    subtitle: 'நீங்கள் இல்லாத நேரத்தில் என்ன மாறியது என்பதைப் பாருங்கள்.',
+    topics: ['அனைத்தும்', 'தமிழ்நாடு', 'இந்தியா', 'உலகம்', 'வணிகம்', 'தொழில்நுட்பம்', 'சுகாதாரம்'],
 
 
 
@@ -476,6 +487,7 @@ const copy = {
 
 
     understandArrow: 'புரிந்துகொள்ளுங்கள்',
+    whatHappened: 'என்ன நடந்தது',
     brighterTomorrow: 'ஒன்றாக\nஒரு சிறந்த நாளையை நோக்கி',
 
 
@@ -493,6 +505,10 @@ const copy = {
 
 
     kicker: 'जो हो रहा है उसे समझिए',
+
+    greeting: 'सुप्रभात।',
+    subtitle: 'जब आप दूर थे तब क्या बदला, जानिए।',
+    topics: ['सभी', 'तमिलनाडु', 'भारत', 'दुनिया', 'बिज़नेस', 'टेक्नोलॉजी', 'स्वास्थ्य'],
 
 
 
@@ -657,6 +673,7 @@ const copy = {
 
 
     understandArrow: 'समझें',
+    whatHappened: 'क्या हुआ',
     brighterTomorrow: 'मिलकर\nएक बेहतर कल की ओर',
 
 
@@ -673,23 +690,13 @@ const copy = {
 
 
 
-function formatSyncedAgo(timestamp: number | null) {
-
+function formatFreshness(timestamp: number | null) {
   if (!timestamp) return '';
-
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-
-  if (seconds < 5) return 'Synced just now';
-
-  if (seconds < 60) return `Synced ${seconds} sec ago`;
-
-  const minutes = Math.floor(seconds / 60);
-
-  if (minutes < 60) return `Synced ${minutes} min ago`;
-
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (minutes < 1) return 'Updated just now';
+  if (minutes < 60) return `Updated ${minutes} min ago`;
   const hours = Math.floor(minutes / 60);
-
-  return `Synced ${hours} hr ago`;
+  return `Updated ${hours} hr ago`;
 }
 
 
@@ -974,206 +981,53 @@ function removeStory(
 
 
 
-function StoryCard({
-
-
-
-  story,
-
-
-
-  topic,
-
-
-
-  ui,
-
-
-
-}: {
-
-
-
-  story: HomeStory;
-
-
-
-  topic: string;
-
-
-
-  ui: (typeof copy)['en'];
-
-
-
-}) {
-
-
-
-  return (
-
-
-
-    <Link
-
-
-
-      href={storyLink(story, topic)}
-
-
-
-      className="group block overflow-hidden rounded-[24px] border border-white/10 bg-[#19372d]/95 p-4 transition duration-300 hover:-translate-y-1 hover:bg-[#1d4035]"
-
-
-
-    >
-
-
-
-      <div className="relative mb-5 h-28 overflow-hidden rounded-[18px] bg-[linear-gradient(135deg,#24483d_0%,#31584f_48%,#586a72_100%)]">
-
-        {story.image ? (
-
-          <img
-            src={story.image}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
-
-        ) : (
-
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_20%,rgba(224,173,115,.22),transparent_32%),linear-gradient(135deg,rgba(36,72,61,.95),rgba(49,88,79,.95)_48%,rgba(88,106,114,.95))]" />
-
-        )}
-
-        <div className="absolute inset-0 bg-[linear-gradient(160deg,rgba(255,255,255,.08),transparent_42%,rgba(7,28,24,.48)_100%)]" />
-
-        <span className="absolute bottom-3 left-3 rounded-full border border-white/25 bg-black/20 px-2.5 py-1 mono text-[8px] uppercase tracking-[.16em] text-white/90 backdrop-blur-sm">
-
-          EIRA · STORY
-
-        </span>
-
-      </div>
-
-
-
-
-
-
-
-      <p className="mono text-[9px] uppercase tracking-[.16em] text-[#e4ad73]">
-
-
-
-        {story.source || ui.current}
-
-
-
-      </p>
-
-
-
-
-
-
-
-      <h3 className="serif mt-2 text-[22px] leading-[1.12] text-[#f5efe5]">
-
-
-
-        {story.title}
-
-
-
-      </h3>
-
-
-
-
-
-
-
-      {story.description && (
-
-
-
-        <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#c9c2b8]">
-
-
-
-          {story.description}
-
-
-
-        </p>
-
-
-
-      )}
-
-
-
-
-
-
-
-      <div className="mt-4 flex items-center justify-between gap-3">
-
-
-
-        <span className="mono text-[9px] uppercase tracking-wider text-[#9faaa3]">
-
-
-
-          {formatDate(story.publishedAt)}
-
-
-
-        </span>
-
-
-
-
-
-
-
-        <span className="inline-flex items-center gap-1 text-xs text-[#ead9c5]">
-
-
-
-          {ui.understandArrow}
-
-
-
-          <ArrowRight size={13} />
-
-
-
-        </span>
-
-
-
-      </div>
-
-
-
-    </Link>
-
-
-
-  );
-
-
-
+function topicLabel(topic: string) {
+  const labels: Record<string, string> = {
+    'public-safety': 'Public safety',
+    'courts': 'Courts',
+    'infrastructure': 'Infrastructure',
+    'technology': 'Technology',
+    'health': 'Health',
+    'business': 'Business',
+    'economy': 'Economy',
+    'government': 'Government',
+    'education': 'Education',
+    'disaster': 'Disaster',
+    'weather': 'Weather',
+    'general': 'EIRA story',
+  };
+  return labels[topic] || topic.replace(/-/g, ' ');
 }
 
-
-
-
-
+function StoryCard({
+  story,
+  topic,
+  ui,
+}: {
+  story: HomeStory;
+  topic: string;
+  ui: (typeof copy)['en'];
+}) {
+  return (
+    <Link
+      href={storyLink(story, topic)}
+      className="group block rounded-[20px] border border-white/10 bg-[#17352c] p-6 shadow-[0_14px_40px_rgba(0,0,0,.14)] transition duration-300 hover:-translate-y-1 hover:border-white/20"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="mono text-[9px] uppercase tracking-[.16em] text-[#d9a071]">{topicLabel(story.topic || 'general')}</span>
+        <span className="mono text-[8px] uppercase tracking-[.14em] text-[#8f9b94]">{formatDate(story.publishedAt)}</span>
+      </div>
+      <h3 className="serif mt-3 line-clamp-2 text-[23px] leading-[1.08] tracking-[-.025em] text-[#f5efe5]">{story.title}</h3>
+      {story.description && (
+        <p className="mt-4 line-clamp-2 text-[14px] leading-6 text-[#c9c1b5]">{story.description}</p>
+      )}
+      <div className="mt-5 flex items-center justify-between border-t border-white/8 pt-4">
+        <span className="mono text-[8px] uppercase tracking-[.14em] text-[#8f9b94]">{story.source || ui.current}</span>
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-[#f5efe5] group-hover:text-[#d98970]">{ui.understandArrow} <ArrowRight size={14} /></span>
+      </div>
+    </Link>
+  );
+}
 
 
 export default function Home() {
@@ -1197,6 +1051,9 @@ export default function Home() {
 
 
     useState(true);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedRef = useRef(false);
 
 
 
@@ -1225,6 +1082,8 @@ export default function Home() {
 
 
     useState<Language>('en');
+
+  const [activeTopic, setActiveTopic] = useState('All');
 
 
 
@@ -1460,7 +1319,11 @@ export default function Home() {
 
 
 
-    setLoading(true);
+    if (hasLoadedRef.current) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
 
 
 
@@ -1555,6 +1418,7 @@ export default function Home() {
 
 
       setData(result);
+      hasLoadedRef.current = true;
       const retrievedTime = new Date(result.retrievedAt).getTime();
       setSyncedAt(Number.isNaN(retrievedTime) ? Date.now() : retrievedTime);
 
@@ -1589,6 +1453,7 @@ export default function Home() {
 
 
       setLoading(false);
+      setRefreshing(false);
 
 
 
@@ -1642,58 +1507,37 @@ export default function Home() {
 
 
 
-  const region =
+  const region = data?.region || 'India';
 
+  const allRegional = data?.currentPool?.regional ?? data?.regional ?? [];
+  const allIndia = data?.currentPool?.india ?? data?.india ?? [];
+  const allWorld = data?.currentPool?.world ?? data?.world ?? [];
 
+  const topicKey = activeTopic.toLowerCase();
+  const topicStories = (stories: HomeStory[]) => stories.filter((story) => story.topic === topicKey);
 
-    data?.region || 'India';
+  const filteredRegional = activeTopic === 'All' || activeTopic === region
+    ? allRegional
+    : activeTopic === 'India' || activeTopic === 'World'
+      ? []
+      : topicStories(allRegional);
 
+  const filteredIndia = activeTopic === 'All' || activeTopic === 'India'
+    ? allIndia
+    : activeTopic === 'World'
+      ? []
+      : topicStories(allIndia);
 
+  const filteredWorld = activeTopic === 'All' || activeTopic === 'World'
+    ? allWorld
+    : topicStories(allWorld);
 
-
-
-
-
-  const regional =
-
-
-
-    data?.regional ?? [];
-
-
-
-
-
-
-
-  const india =
-
-
-
-    data?.india ?? [];
-
-
-
-
-
-
-
-  const world =
-
-
-
-    data?.world ?? [];
-
-
-
-
-
-
+  const hasTopicResults = filteredRegional.length + filteredIndia.length + filteredWorld.length > 0;
+  const regional = filteredRegional;
+  const india = filteredIndia;
+  const world = filteredWorld;
 
   /*
-
-
-
    * IMPORTANT:
 
 
@@ -1830,699 +1674,172 @@ export default function Home() {
 
 
 
+  const storyScope = (story: HomeStory) =>
+    regional.includes(story) ? region : india.includes(story) ? 'India' : 'World';
 
+  const heroScope = hero ? storyScope(hero) : region;
 
 
 
   return (
+    <main className="min-h-screen bg-[radial-gradient(circle_at_78%_0%,rgba(217,137,112,.10),transparent_28%),linear-gradient(180deg,#102a23_0%,#0e241d_52%,#102a23_100%)] text-[#f5efe5]">
+      <section className="pb-12 pt-5">
+        <Nav />
 
-
-
-    <main className="min-h-screen bg-[#10261d]">
-
-
-
-      {/* =====================================================
-
-
-
-          HERO
-
-
-
-          ===================================================== */}
-
-
-
-      <section className="relative isolate overflow-hidden px-5 pb-8 pt-5 sm:px-8 lg:px-10">
-
-        <div
-
-          className="absolute inset-0 -z-30 bg-cover bg-center"
-
-          style={{ backgroundImage: "url('/eira-hero-bg.png')" }}
-
-        />
-
-        <div className="absolute inset-0 -z-20 bg-[#071b18]/35 mix-blend-multiply" />
-
-        <div className="absolute inset-0 -z-20 bg-gradient-to-r from-[#071b18]/55 via-transparent to-[#071b18]/15" />
-
-        <div className="absolute inset-x-0 bottom-0 -z-10 h-56 bg-[linear-gradient(to_bottom,rgba(16,38,29,0)_0%,rgba(16,38,29,.10)_28%,rgba(16,38,29,.42)_58%,#10261d_100%)]" />
-
-        <div className="pointer-events-none absolute right-[12%] top-[12%] -z-10 h-64 w-64 rounded-full bg-[#f6c48f]/15 blur-3xl" />
-
-<div className="relative z-10">
-
-          <div className="[&_a]:!text-white [&_button]:!text-white [&_svg]:!text-white">
-
-            <Nav />
-
-          </div>
-
-
-
-          <div className="mx-auto max-w-7xl pt-12 sm:pt-16">
-
-            <div className="grid items-start gap-8 lg:grid-cols-[.95fr_1.05fr] lg:gap-12">
-
-              <div className="max-w-[680px] pb-4 lg:pb-8">
-
-                <p className="inline-block rounded-full border border-white/15 bg-[#10261d]/25 px-3 py-1 mono text-[10px] uppercase tracking-[.22em] text-[#ead9c9] backdrop-blur-[2px]">
-
-                  {ui.kicker}
-
-                </p>
-
-
-
-                <h1 className="serif mt-5 max-w-[680px] text-[48px] leading-[.94] tracking-[-.055em] text-white drop-shadow-[0_3px_18px_rgba(0,0,0,.22)] sm:text-[68px] lg:text-[78px]">
-
-                  {ui.headline1}
-
-                  <br />
-
-                  <i>{ui.headline2}</i>
-
-                </h1>
-
-
-
-                <p className="mt-6 max-w-lg text-base leading-7 text-white/85 drop-shadow-[0_2px_10px_rgba(0,0,0,.2)] sm:text-lg">
-
-                  {ui.description}
-
-                </p>
-
-
-
-                <div className="mt-7 inline-flex items-center gap-2 rounded-full border border-white/30 bg-black/20 px-4 py-2 text-xs text-white shadow-[0_8px_30px_rgba(0,0,0,.12)] backdrop-blur-md">
-
-                  <span className="h-2 w-2 rounded-full bg-[#bb7664]" />
-
-                  {ui.region} · <b>{region}</b>
-
-                </div>
-
+        <div className="px-5 sm:px-8 lg:px-10">
+          <div className="mx-auto max-w-7xl">
+            <div className="pt-20 sm:pt-24">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="mono text-[10px] uppercase tracking-[.2em] text-[#d9a071]">{ui.kicker}</p>
+                <h1 className="serif mt-2 text-[38px] leading-none tracking-[-.045em] text-[#f5efe5] sm:text-[50px]">{ui.greeting}</h1>
+                <p className="mt-3 text-base text-[#c9c1b5] sm:text-lg">{ui.subtitle}</p>
               </div>
+              <div className="mono mt-4 text-[10px] uppercase tracking-[.14em] text-[#a9aaa2] sm:mt-0">
+                {region} · {formatTodayDate()}
+              </div>
+            </div>
 
+            {refreshing && data && (
+              <div className="mt-3 flex items-center gap-2 mono text-[9px] uppercase tracking-[.16em] text-[#a9aaa2]">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#d98970]" />
+                Updating today’s briefing
+              </div>
+            )}
 
-
-              {error ? (
-
-                <div className="rounded-[30px] border border-white/80 bg-white/80 p-8 text-[#10233e] shadow-[0_28px_90px_rgba(31,42,59,.18)] backdrop-blur-xl">
-
-                  <p className="font-medium">{error}</p>
-
-                  <button onClick={loadHome} className="mt-5 rounded-full bg-[#10233e] px-5 py-3 text-sm text-white">
-
-                    {ui.retry}
-
-                  </button>
-
-                </div>
-
-              ) : loading ? (
-
-                <div className="relative mt-8 flex min-h-[300px] items-center overflow-hidden rounded-[28px] border border-white/30 bg-white/70 p-8 text-[#10233e] shadow-[0_30px_90px_rgba(0,0,0,.18)] backdrop-blur-xl lg:mt-10">
-                  {ui.loading} {region}…
-                </div>
-
-              ) : hero ? (
-
-                <article className="relative mt-8 overflow-hidden rounded-[28px] border border-white/30 bg-[#071f1a]/62 shadow-[0_30px_90px_rgba(0,0,0,.38)] backdrop-blur-xl lg:mt-10">
-
-                  <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-[#e8ad83]/18 blur-3xl" />
-
-                  <div className="relative grid min-w-0 gap-0 md:grid-cols-[minmax(0,1.15fr)_minmax(0,.72fr)]">
-
-                    <div className="p-6 sm:p-8 lg:p-9">
-
-                      <div className="flex flex-wrap items-center gap-3">
-
-                        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 mono text-[9px] uppercase tracking-wider text-white backdrop-blur-md">
-
-                          {ui.startHere}
-
-                        </span>
-
-                        <span className="mono text-[9px] uppercase tracking-wider text-white/60">
-
-                          {hero.source} · {formatTodayDate()}
-
-                        </span>
-
-                      </div>
-
-
-
-                      <p className="mono mt-7 text-[10px] uppercase tracking-[.18em] text-[#e8b07d]">
-
-                        {region} · {ui.current}
-
-                      </p>
-
-
-
-                      <h2 className="serif mt-3 max-w-2xl text-[30px] leading-[1.06] tracking-[-.035em] text-white drop-shadow-[0_2px_12px_rgba(0,0,0,.18)] sm:text-[39px]">
-
-                        {hero.title}
-
-                      </h2>
-
-
-
-                      {hero.description && (
-
-                        <p className="mt-5 max-w-xl text-sm leading-6 text-white/72">
-
-                          {hero.description}
-
-                        </p>
-
-                      )}
-
-
-
-                      <div className="mt-7 flex flex-wrap items-center gap-4">
-
-                        <Link
-
-                          href={storyLink(hero, region)}
-
-                          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-white px-5 text-sm font-medium text-[#10233e] shadow-[0_10px_25px_rgba(0,0,0,.18)] transition hover:-translate-y-0.5"
-
-                        >
-
-                          {ui.understand}
-
-                          <ArrowRight size={16} />
-
-                        </Link>
-
-                        <span className="mono text-[9px] uppercase tracking-[.16em] text-white/55">
-
-                          Live editorial selection · {formatSyncedAgo(syncedAt)}
-
-                        </span>
-
-                      </div>
-
-                    </div>
-
-
-
-                    <div
-
-                      className="relative min-h-[230px] overflow-hidden bg-cover bg-center"
-
-                      style={{ backgroundImage: "url('/eira-hero-bg.png')" }}
-
+            <div className="mt-7 flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none]">
+              {(() => {
+                const topicItems = [
+                  { key: 'All', label: ui.topics[0] },
+                  ...(region !== 'India' ? [{ key: region, label: region }] : []),
+                  { key: 'India', label: ui.topics[2] },
+                  { key: 'World', label: ui.topics[3] },
+                  { key: 'Business', label: ui.topics[4] },
+                  { key: 'Technology', label: ui.topics[5] },
+                  { key: 'Health', label: ui.topics[6] },
+                ];
+                return topicItems.map((topic) => {
+                  const isActive = activeTopic === topic.key;
+                  return (
+                    <button
+                      key={topic.key}
+                      type="button"
+                      onClick={() => setActiveTopic(topic.key)}
+                      className={`shrink-0 rounded-full border px-5 py-2.5 text-sm transition ${isActive ? 'border-[#d98970] bg-[#d98970] text-white shadow-[0_8px_20px_rgba(0,0,0,.20)]' : 'border-white/10 bg-[#17352c]/90 text-[#d8d0c4] shadow-[0_5px_18px_rgba(31,42,59,.05)] hover:-translate-y-0.5 hover:border-white/25'}`}
                     >
-
-                      <div className="absolute inset-0 bg-[linear-gradient(160deg,rgba(7,28,27,.12),rgba(7,28,27,.58))]" />
-
-                      <div className="absolute left-5 top-5 rounded-full border border-white/25 bg-black/15 px-3 py-1.5 text-[9px] uppercase tracking-[.18em] text-white backdrop-blur-md">
-
-                        EIRA · NOW
-
-                      </div>
-
-                      <div className="absolute left-5 right-5 top-[58px] min-w-0 rounded-2xl border border-white/20 bg-[#10261d]/55 px-3.5 py-2.5 shadow-[0_8px_30px_rgba(0,0,0,.16)] backdrop-blur-md">
-
-                        <div className="flex min-w-0 items-start gap-2">
-
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#d98970]" />
-
-                          <span className="mono min-w-0 break-words whitespace-pre-line text-[8px] font-medium uppercase leading-[1.4] tracking-[.12em] text-[#e6b19b]">
-
-                            {ui.brighterTomorrow}
-
-                          </span>
-
-                        </div>
-
-                      </div>
-
-                      <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-white/20 bg-[#071f1a]/65 p-4 text-white backdrop-blur-md">
-
-                        <p className="mono text-[9px] uppercase tracking-[.16em] text-[#f0c39b]">{ui.startHere}</p>
-
-                        <p className="serif mt-1 text-xl leading-tight">{region}</p>
-
-                        <p className="mt-1 text-xs text-white/75">{ui.changed}</p>
-
-                      </div>
-
-                    </div>
-
-                  </div>
-
-                </article>
-
-              ) : (
-
-                <div className="rounded-[30px] border border-white/80 bg-white/70 p-8 text-[#10233e] shadow-[0_28px_90px_rgba(31,42,59,.18)] backdrop-blur-xl">
-
-                  {ui.noStories}
-
-                </div>
-
-              )}
-
+                      {topic.label}
+                    </button>
+                  );
+                });
+              })()}
             </div>
 
-
-
-            <div className="mt-5 flex items-center justify-between text-white/80">
-
-              <p className="mono text-[9px] uppercase tracking-[.2em]">Less noise. More clarity.</p>
-
-              <div className="hidden items-center gap-2 sm:flex">
-
-                <span className="h-px w-8 bg-white/30" />
-
-                <span className="mono text-[9px] uppercase tracking-[.18em]">EIRA</span>
-
+            {error ? (
+              <div className="mt-8 rounded-[24px] border border-white/10 bg-[#17352c] p-8 shadow-sm">
+                <p className="font-medium text-[#f5efe5]">{error}</p>
+                <button onClick={loadHome} className="mt-5 rounded-full bg-[#10233e] px-5 py-3 text-sm text-white">{ui.retry}</button>
               </div>
+            ) : loading && !data ? (
+              <div className="mt-8 flex min-h-[340px] items-center justify-center rounded-[24px] border border-white/10 bg-[#17352c] p-8 text-[#c9c1b5] shadow-[0_10px_30px_rgba(31,42,59,.06)]">
+                {ui.loading} {region}…
+              </div>
+            ) : activeTopic !== 'All' && !hasTopicResults ? (
+              <div className="mt-8 rounded-[24px] border border-white/10 bg-[#17352c] p-8 sm:p-10">
+                <p className="mono text-[9px] uppercase tracking-[.18em] text-[#d9a071]">{activeTopic}</p>
+                <h2 className="serif mt-2 text-3xl text-[#f5efe5]">Nothing strong enough for today’s briefing.</h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-[#c9c1b5]">EIRA would rather show you fewer useful stories than fill this topic with weak or unrelated reporting.</p>
+                <button type="button" onClick={() => setActiveTopic('All')} className="mt-5 rounded-full bg-[#d98970] px-5 py-3 text-sm font-medium text-white">See today’s briefing</button>
+              </div>
+            ) : hero ? (
+              <div className="mt-8 grid gap-5 lg:grid-cols-[minmax(0,1.85fr)_minmax(300px,.72fr)]">
+                <Link href={storyLink(hero, heroScope)} className="group relative overflow-hidden rounded-[24px] border border-white/10 bg-[#17352c] p-7 shadow-[0_24px_65px_rgba(0,0,0,.16)] transition hover:-translate-y-0.5 sm:p-9">
+                  <div className="absolute right-0 top-0 h-48 w-48 rounded-full bg-[#d98970]/10 blur-3xl" />
+                  <div className="relative">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-[#d98970] px-3 py-1 mono text-[9px] uppercase tracking-[.16em] text-white">{ui.startHere}</span>
+                      <span className="mono text-[9px] uppercase tracking-[.14em] text-[#a9aaa2]">{hero.source} · {formatDate(hero.publishedAt)}</span>
+                    </div>
+                    <p className="mono mt-7 text-[9px] uppercase tracking-[.18em] text-[#d9a071]">{topicLabel(hero.topic || 'general')}</p>
+                    <h2 className="serif mt-2 max-w-3xl text-[30px] leading-[1.06] tracking-[-.035em] text-[#f5efe5] sm:max-w-[92%] sm:text-[46px]">{hero.title}</h2>
+                    {hero.description && (
+                      <div className="mt-6 max-w-2xl border-l border-[#d98970]/50 pl-4">
+                        <p className="mono text-[8px] uppercase tracking-[.18em] text-[#d9a071]">{ui.whatHappened}</p>
+                        <p className="mt-2 text-[15px] leading-7 text-[#c9c1b5]">{hero.description}</p>
+                      </div>
+                    )}
+                    <div className="mt-7 inline-flex items-center gap-2 rounded-full border border-[#d98970]/40 px-4 py-2.5 text-sm font-medium text-[#f5efe5] transition group-hover:bg-[#d98970] group-hover:border-[#d98970]">{ui.understandArrow}<ArrowRight size={15} /></div>
+                  </div>
+                </Link>
 
+                <div className="rounded-[24px] border border-white/8 bg-[#17352c] p-3 shadow-[0_10px_30px_rgba(31,42,59,.07)]">
+                  {[...remainingRegional, ...indiaStories, ...worldStories].slice(0, 3).map((story) => (
+                    <Link key={story.url || story.title} href={storyLink(story, storyScope(story))} className="group flex gap-3 border-b border-white/8 p-3 last:border-b-0">
+                      <div className="flex h-[58px] w-[92px] shrink-0 items-center justify-center rounded-[12px] border border-[#d98970]/20 bg-[#102a23] p-2 text-center">
+                        <span className="mono text-[7px] uppercase tracking-[.14em] text-[#d9a071]">{topicLabel(story.topic || 'general')}</span>
+                      </div>
+                      <div className="min-w-0 py-1">
+                        <p className="mono text-[8px] uppercase tracking-[.14em] text-[#d9a071]">{story.source || ui.current}</p>
+                        <h3 className="serif mt-1 line-clamp-2 text-[16px] leading-[1.08] text-[#f5efe5]">{story.title}</h3>
+                        {story.description && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[#aeb8b1]">{story.description}</p>}
+                        <p className="mono mt-2 text-[8px] uppercase tracking-wider text-[#a9aaa2]">{formatDate(story.publishedAt)}</p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-8 rounded-[24px] border border-white/10 bg-[#17352c] p-8 text-[#c9c1b5] shadow-sm">{ui.noStories}</div>
+            )}
+
+            <div className="mt-10 flex items-center justify-between">
+              <p className="mono text-[9px] uppercase tracking-[.18em] text-[#a9aaa2]">{ui.startWith}</p>
+              <p className="mono text-[9px] uppercase tracking-[.14em] text-[#d9a071]">{formatFreshness(syncedAt)}</p>
             </div>
-
+            </div>
           </div>
-
         </div>
-
       </section>
 
-
-
-'''
-
-      {/* =====================================================
-
-
-
-          REGIONAL STORIES
-
-
-
-          ===================================================== */}
-
-
-
       {remainingRegional.length > 0 && (
-
-
-
-        <section className="px-5 pb-12 sm:px-8 lg:px-10">
-
-
-
+        <section className="border-t border-white/8 bg-[#0d211b] px-5 py-12 sm:px-8 lg:px-10">
           <div className="mx-auto max-w-7xl">
-
-
-
-            <SectionLabel>
-
-
-
-              {region}
-
-
-
-            </SectionLabel>
-
-
-
-
-
-
-
-            <h2 className="serif text-4xl tracking-[-.04em] text-[#f5eee4]">
-
-
-
-              {ui.moreRegion}
-
-
-
-            </h2>
-
-
-
-
-
-
-
-            <div className="mt-7 grid gap-5 md:grid-cols-2">
-
-
-
-              {remainingRegional.map(
-
-
-
-                (story) => (
-
-
-
-                  <StoryCard
-
-
-
-                    key={
-
-
-
-                      story.url ||
-
-
-
-                      story.title
-
-
-
-                    }
-
-
-
-                    story={story}
-
-
-
-                    topic={region}
-
-
-
-                    ui={ui}
-
-
-
-                  />
-
-
-
-                )
-
-
-
-              )}
-
-
-
+            <SectionLabel>{region}</SectionLabel>
+            <h2 className="serif mt-1 text-4xl tracking-[-.04em] text-[#f5efe5]">{ui.moreRegion}</h2>
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              {remainingRegional.map((story) => <StoryCard key={story.url || story.title} story={story} topic={region} ui={ui} />)}
             </div>
-
-
-
           </div>
-
-
-
         </section>
-
-
-
       )}
-
-
-
-
-
-
-
-      {/* =====================================================
-
-
-
-          INDIA
-
-
-
-          ===================================================== */}
-
-
 
       {indiaStories.length > 0 && (
-
-
-
-        <section className="px-5 py-12 sm:px-8 lg:px-10">
-
-
-
+        <section className="border-t border-white/8 px-5 py-12 sm:px-8 lg:px-10">
           <div className="mx-auto max-w-7xl">
-
-
-
-            <SectionLabel>
-
-
-
-              India
-
-
-
-            </SectionLabel>
-
-
-
-
-
-
-
-            <h2 className="serif text-4xl tracking-[-.04em] text-[#f5eee4]">
-
-
-
-              {ui.national}
-
-
-
-            </h2>
-
-
-
-
-
-
-
-            <div className="mt-7 grid gap-5 md:grid-cols-2">
-
-
-
-              {indiaStories.map(
-
-
-
-                (story) => (
-
-
-
-                  <StoryCard
-
-
-
-                    key={
-
-
-
-                      story.url ||
-
-
-
-                      story.title
-
-
-
-                    }
-
-
-
-                    story={story}
-
-
-
-                    topic="India"
-
-
-
-                    ui={ui}
-
-
-
-                  />
-
-
-
-                )
-
-
-
-              )}
-
-
-
+            <SectionLabel>India</SectionLabel>
+            <h2 className="serif mt-1 text-4xl tracking-[-.04em] text-[#f5efe5]">{ui.national}</h2>
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              {indiaStories.map((story) => <StoryCard key={story.url || story.title} story={story} topic="India" ui={ui} />)}
             </div>
-
-
-
           </div>
-
-
-
         </section>
-
-
-
       )}
-
-
-
-
-
-
-
-      {/* =====================================================
-
-
-
-          WORLD
-
-
-
-          ===================================================== */}
-
-
 
       {worldStories.length > 0 && (
-
-
-
-        <section className="px-5 py-12 sm:px-8 lg:px-10">
-
-
-
+        <section className="border-t border-white/8 px-5 py-12 sm:px-8 lg:px-10">
           <div className="mx-auto max-w-7xl">
-
-
-
-            <SectionLabel>
-
-
-
-              World
-
-
-
-            </SectionLabel>
-
-
-
-
-
-
-
-            <h2 className="serif text-4xl tracking-[-.04em] text-[#f5eee4]">
-
-
-
-              {ui.world}
-
-
-
-            </h2>
-
-
-
-
-
-
-
-            <div className="mt-7 grid gap-5 md:grid-cols-2">
-
-
-
-              {worldStories.map(
-
-
-
-                (story) => (
-
-
-
-                  <StoryCard
-
-
-
-                    key={
-
-
-
-                      story.url ||
-
-
-
-                      story.title
-
-
-
-                    }
-
-
-
-                    story={story}
-
-
-
-                    topic="World"
-
-
-
-                    ui={ui}
-
-
-
-                  />
-
-
-
-                )
-
-
-
-              )}
-
-
-
+            <SectionLabel>World</SectionLabel>
+            <h2 className="serif mt-1 text-4xl tracking-[-.04em] text-[#f5efe5]">{ui.world}</h2>
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              {worldStories.map((story) => <StoryCard key={story.url || story.title} story={story} topic="World" ui={ui} />)}
             </div>
-
-
-
           </div>
-
-
-
         </section>
-
-
-
       )}
 
-
-
-
-
-
-
       <Footer />
-
-
-
     </main>
-
-
-
   );
+
 
 
 

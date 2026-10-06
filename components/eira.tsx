@@ -42,7 +42,7 @@ const labels: Record<Language, {
   en: {
     home: 'Home', explore: 'Explore', ask: 'Ask', library: 'Library',
     catchUp: 'Catch me up', search: 'Search EIRA',
-    footer: 'Made to make the world more understandable. Demo prototype.',
+    footer: 'Made to make the world more understandable.',
     demo: 'EIRA demo · illustrative content, sources & status',
     evidence: 'Evidence & status', confirmed: 'Confirmed', developing: 'Developing',
     evidenceText: 'Confirmed means the available reporting directly establishes the fact. Developing means the reporting supports a pattern that may still change.',
@@ -51,7 +51,7 @@ const labels: Record<Language, {
   ta: {
     home: 'முகப்பு', explore: 'ஆராயுங்கள்', ask: 'கேளுங்கள்', library: 'நூலகம்',
     catchUp: 'விரைவாகத் தெரிந்துகொள்ளுங்கள்', search: 'EIRA-வைத் தேடுங்கள்',
-    footer: 'உலகை மேலும் புரிந்துகொள்ளக்கூடியதாக மாற்ற உருவாக்கப்பட்டது. டெமோ முன்மாதிரி.',
+    footer: 'உலகை மேலும் புரிந்துகொள்ளக்கூடியதாக மாற்ற உருவாக்கப்பட்டது.',
     demo: 'EIRA டெமோ · எடுத்துக்காட்டு உள்ளடக்கம், ஆதாரங்கள் மற்றும் நிலை',
     evidence: 'ஆதாரமும் நிலையும்', confirmed: 'உறுதிப்படுத்தப்பட்டது', developing: 'வளர்ந்து வருகிறது',
     evidenceText: 'உறுதிப்படுத்தப்பட்டது என்பது கிடைத்த செய்திகளால் உண்மை நேரடியாக நிறுவப்பட்டுள்ளது என்பதாகும். வளர்ந்து வருகிறது என்பது செய்திகளால் ஒரு போக்கு ஆதரிக்கப்படுகிறது, ஆனால் அது இன்னும் மாறக்கூடும் என்பதாகும்.',
@@ -60,7 +60,7 @@ const labels: Record<Language, {
   hi: {
     home: 'होम', explore: 'एक्सप्लोर करें', ask: 'पूछें', library: 'लाइब्रेरी',
     catchUp: 'जल्दी से अपडेट हों', search: 'EIRA खोजें',
-    footer: 'दुनिया को और समझने योग्य बनाने के लिए बनाया गया। डेमो प्रोटोटाइप।',
+    footer: 'दुनिया को और समझने योग्य बनाने के लिए बनाया गया।',
     demo: 'EIRA डेमो · उदाहरण सामग्री, स्रोत और स्थिति',
     evidence: 'साक्ष्य और स्थिति', confirmed: 'पुष्टि की गई', developing: 'विकसित हो रही',
     evidenceText: 'पुष्टि की गई का अर्थ है कि उपलब्ध रिपोर्टिंग तथ्य को सीधे स्थापित करती है। विकसित हो रही का अर्थ है कि रिपोर्टिंग किसी पैटर्न का समर्थन करती है, लेकिन वह अभी बदल सकता है।',
@@ -70,8 +70,25 @@ const labels: Record<Language, {
 
 export function Wordmark() {
   return (
-    <Link href="/" className="serif text-3xl tracking-[-.08em]" aria-label="EIRA home">
-      EIRA<span className="text-[#ca806d]">.</span>
+    <Link
+      href="/"
+      className="group inline-flex items-center gap-2.5 leading-none"
+      aria-label="EIRA home"
+    >
+      <span
+        aria-hidden="true"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-[9px] border border-current/20 bg-current/[0.06] transition-transform duration-200 group-hover:-rotate-3"
+      >
+        <span className="relative block h-[15px] w-[15px]">
+          <i className="absolute left-0 top-0 h-[2px] w-[13px] rounded-full bg-current" />
+          <i className="absolute left-0 top-[6px] h-[2px] w-[10px] rounded-full bg-current" />
+          <i className="absolute bottom-0 left-0 h-[2px] w-[13px] rounded-full bg-current" />
+          <i className="absolute left-[9px] top-[3px] h-[8px] w-[2px] rounded-full bg-current opacity-80" />
+        </span>
+      </span>
+      <span className="serif text-3xl tracking-[-.08em]">
+        EIRA<span className="text-[#ca806d]">.</span>
+      </span>
     </Link>
   );
 }
@@ -101,17 +118,17 @@ export function Nav() {
     [ui.library, '/library'],
   ];
 
-  const ink = isHome ? 'text-[#10233e]' : 'text-[#f6f0e8]';
+  const ink = 'text-[#f6f0e8]';
 
   return (
-    <header className={`absolute top-0 z-30 w-full px-5 py-2 sm:px-8 sm:py-5 ${ink}`}>
+    <header className={`absolute top-0 z-30 w-full px-5 py-5 sm:px-8 lg:px-10 ${ink}`}>
       <div className="mx-auto flex max-w-7xl items-center justify-between">
         <Wordmark />
 
-        <nav className={`hidden items-center gap-8 text-sm md:flex ${isHome ? 'text-[#10233e]/75' : 'text-[#ede4d8]/80'}`} aria-label="Main navigation">
+        <nav className={`hidden items-center gap-8 text-sm md:flex text-[#ede4d8]/80`} aria-label="Main navigation">
           {nav.map(([label, href]) => (
             <Link
-              className={path === href ? ink : isHome ? 'hover:text-[#10233e]' : 'hover:text-white'}
+              className={path === href ? ink : 'hover:text-white'}
               href={href}
               key={href}
             >
@@ -121,11 +138,11 @@ export function Nav() {
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
-          <LanguageSwitcher isHome={isHome} />
-          <Link href="/catch-up" className={`rounded-full border px-4 py-2 text-xs font-medium ${isHome ? 'border-[#10233e]/20 hover:bg-[#10233e]/5' : 'border-white/30 hover:bg-white/10'}`}>
+          <LanguageSwitcher isHome={false} />
+          <Link href="/catch-up" className={`rounded-full border px-4 py-2 text-xs font-medium border-white/30 hover:bg-white/10`}>
             {ui.catchUp}
           </Link>
-          <Link href="/explore" aria-label={ui.search} className={`grid h-9 w-9 place-items-center rounded-full ${isHome ? 'border border-[#10233e]/20' : 'bg-[#f4ede2] text-[#20342b]'}`}>
+          <Link href="/explore" aria-label={ui.search} className={`grid h-9 w-9 place-items-center rounded-full bg-[#f4ede2] text-[#20342b]`}>
             <Search size={17} />
           </Link>
         </div>
@@ -136,7 +153,7 @@ export function Nav() {
       </div>
 
       {open && (
-        <nav className={`mx-auto mt-4 flex max-w-md flex-col rounded-2xl p-3 ${isHome ? 'bg-[#f8f2eb] shadow-lg' : 'glass'}`} aria-label="Mobile navigation">
+        <nav className={`mx-auto mt-4 flex max-w-md flex-col rounded-2xl p-3 glass`} aria-label="Mobile navigation">
           {nav.map(([label, href]) => (
             <Link onClick={() => setOpen(false)} href={href} className="rounded-xl px-4 py-4" key={href}>
               {label}
@@ -145,7 +162,7 @@ export function Nav() {
           <Link onClick={() => setOpen(false)} href="/catch-up" className="rounded-xl bg-[#f3eadc] px-4 py-4 text-[#20342b]">
             {ui.catchUp}
           </Link>
-          <div className="px-4 py-3"><LanguageSwitcher isHome={isHome} /></div>
+          <div className="px-4 py-3"><LanguageSwitcher isHome={false} /></div>
         </nav>
       )}
     </header>

@@ -1,24 +1,57 @@
-import Parser from "rss-parser";
+import * as RSSParserModule from "rss-parser";
 
 import { GoogleGenAI } from "@google/genai";
 
 import { NextResponse } from "next/server";
+import { getLanguageFromRequest, translateCatchUpResult, translateStoryResult } from '@/utils/eira-translate'
 
 
 
-const apiKey = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 
 
-const ai = apiKey
+if (!GEMINI_API_KEY) {
 
-  ? new GoogleGenAI({ apiKey })
+  console.warn("GEMINI_API_KEY is not configured.");
+
+}
+
+
+
+const ai = GEMINI_API_KEY
+
+  ? new GoogleGenAI({ apiKey: GEMINI_API_KEY })
 
   : null;
 
 
 
+const Parser =
+  (RSSParserModule as any).default ??
+  (RSSParserModule as any).Parser;
+
+if (!Parser) {
+  throw new Error("rss-parser could not be loaded.");
+}
+
 const parser = new Parser();
+
+
+
+type Article = {
+
+  title: string;
+
+  link: string;
+
+  description: string;
+
+  publishedAt: string;
+
+  source: string;
+
+};
 
 
 
@@ -28,25 +61,9 @@ type SelectedStory = {
 
   source: string;
 
-  publishedAt: string;
+  publishedAt?: string;
 
-  description: string;
-
-  url: string;
-
-};
-
-
-
-type Article = {
-
-  title: string;
-
-  source: string;
-
-  publishedAt: string;
-
-  description: string;
+  description?: string;
 
   url: string;
 
@@ -54,17 +71,17 @@ type Article = {
 
 
 
-type Source = {
+type EvidenceItem = {
 
   id: string;
 
   title: string;
 
+  url: string;
+
   source: string;
 
   publishedAt: string;
-
-  url: string;
 
 };
 
@@ -96,15 +113,291 @@ type StoryResult = {
 
   bottomLine: string;
 
+  confirmed: string[];
+
+  openQuestions: string[];
+
 };
 
 
 
-/* =========================================================
+type CatchUpEvidenceItem = {
 
-   TEXT HELPERS
+  text: string;
 
-   ========================================================= */
+  sourceIds: number[];
+
+};
+
+type CatchUpResult = {
+
+  mode: "catchup";
+
+  shortVersion: string;
+
+  whatChanged: CatchUpEvidenceItem[];
+
+  confirmed: CatchUpEvidenceItem[];
+
+  reported: CatchUpEvidenceItem[];
+
+  uncertain: CatchUpEvidenceItem[];
+
+  whyItMatters: string;
+
+  whatToWatch: string[];
+
+};
+
+
+
+const STOP_WORDS = new Set([
+
+  "the",
+
+  "a",
+
+  "an",
+
+  "and",
+
+  "or",
+
+  "but",
+
+  "for",
+
+  "with",
+
+  "from",
+
+  "into",
+
+  "about",
+
+  "after",
+
+  "before",
+
+  "over",
+
+  "under",
+
+  "this",
+
+  "that",
+
+  "these",
+
+  "those",
+
+  "their",
+
+  "they",
+
+  "them",
+
+  "have",
+
+  "has",
+
+  "had",
+
+  "will",
+
+  "would",
+
+  "could",
+
+  "should",
+
+  "been",
+
+  "being",
+
+  "are",
+
+  "was",
+
+  "were",
+
+  "is",
+
+  "of",
+
+  "to",
+
+  "in",
+
+  "on",
+
+  "at",
+
+  "by",
+
+  "as",
+
+  "it",
+
+  "its",
+
+  "be",
+
+  "not",
+
+  "than",
+
+  "more",
+
+  "less",
+
+  "also",
+
+  "can",
+
+  "may",
+
+  "might",
+
+  "how",
+
+  "what",
+
+  "why",
+
+  "when",
+
+  "where",
+
+  "who",
+
+  "which",
+
+]);
+
+
+
+const TERM_GROUPS: string[][] = [
+
+  [
+
+    "india",
+
+    "indian",
+
+    "new delhi",
+
+    "delhi",
+
+    "government",
+
+    "minister",
+
+    "ministry",
+
+  ],
+
+  [
+
+    "semiconductor",
+
+    "semiconductors",
+
+    "chip",
+
+    "chips",
+
+    "fab",
+
+    "fabs",
+
+    "foundry",
+
+    "manufacturing",
+
+  ],
+
+  [
+
+    "cyber",
+
+    "cybersecurity",
+
+    "cyberattack",
+
+    "cyberattacks",
+
+    "digital security",
+
+    "hack",
+
+    "hacking",
+
+    "ransomware",
+
+  ],
+
+  [
+
+    "technology",
+
+    "tech",
+
+    "ai",
+
+    "artificial intelligence",
+
+    "software",
+
+    "data",
+
+  ],
+
+  [
+
+    "business",
+
+    "company",
+
+    "companies",
+
+    "market",
+
+    "markets",
+
+    "investment",
+
+    "investments",
+
+  ],
+
+  [
+
+    "trade",
+
+    "tariff",
+
+    "tariffs",
+
+    "export",
+
+    "exports",
+
+    "import",
+
+    "imports",
+
+    "deal",
+
+    "talks",
+
+    "negotiation",
+
+    "negotiations",
+
+  ],
+
+];
 
 
 
@@ -114,16 +407,6 @@ function cleanText(value: unknown): string {
 
     .replace(/<[^>]*>/g, " ")
 
-    .replace(/ /gi, " ")
-
-    .replace(/&/gi, "&")
-
-    .replace(/"/gi, '"')
-
-    .replace(/'/gi, "'")
-
-    .replace(/'/gi, "'")
-
     .replace(/\s+/g, " ")
 
     .trim();
@@ -132,7 +415,7 @@ function cleanText(value: unknown): string {
 
 
 
-function normalize(value: string): string {
+function normalizeText(value: string): string {
 
   return cleanText(value)
 
@@ -148,251 +431,67 @@ function normalize(value: string): string {
 
 
 
-function cleanTitle(value: unknown): string {
+function tokenize(value: string): string[] {
 
-  return cleanText(value)
+  return normalizeText(value)
 
-    .replace(/\s\|\sInshorts$/i, "")
+    .split(/\s+/)
 
-    .replace(/\s-\sInshorts$/i, "")
+    .filter(
 
-    .replace(/\s\|\sGoogle News$/i, "")
+      (word) =>
 
-    .replace(/\s-\sGoogle News$/i, "")
+        word.length >= 3 &&
 
-    .trim();
+        !STOP_WORDS.has(word) &&
+
+        !/^\d+$/.test(word)
+
+    );
 
 }
 
 
 
-/* =========================================================
+function unique<T>(items: T[]): T[] {
 
-   SOURCE HELPERS
+  return Array.from(new Set(items));
 
-   ========================================================= */
+}
 
 
 
-function hostnameToName(
-
-  url: string
-
-): string {
+function hostnameToName(url: string): string {
 
   try {
 
-    const hostname = new URL(url)
+    const host = new URL(url).hostname
 
-      .hostname
+      .replace(/^www\./, "")
 
-      .replace(/^www\./i, "")
+      .replace(/^m\./, "");
 
-      .replace(/^m\./i, "");
 
-    if (hostname === "news.google.com" || hostname === "google.com" || hostname.endsWith(".google.com")) {
-      return "";
-    }
 
-
-
-    const knownDomains: Record<
-
-      string,
-
-      string
-
-    > = {
-
-      "indianexpress.com":
-
-        "The Indian Express",
-
-
-
-      "economictimes.indiatimes.com":
-
-        "The Economic Times",
-
-
-
-      "economictimes.com":
-
-        "The Economic Times",
-
-
-
-      "business-standard.com":
-
-        "Business Standard",
-
-
-
-      "businessline.global":
-
-        "BusinessLine",
-
-
-
-      "thehindubusinessline.com":
-
-        "BusinessLine",
-
-
-
-      "news18.com":
-
-        "News18",
-
-
-
-      "ndtv.com":
-
-        "NDTV",
-
-
-
-      "ndtvprofit.com":
-
-        "NDTV Profit",
-
-
-
-      "moneycontrol.com":
-
-        "Moneycontrol",
-
-
-
-      "cnbctv18.com":
-
-        "CNBC-TV18",
-
-
-
-      "reuters.com":
-
-        "Reuters",
-
-
-
-      "livemint.com":
-
-        "Mint",
-
-
-
-      "mint.com":
-
-        "Mint",
-
-
-
-      "opindia.com":
-
-        "OpIndia",
-
-
-
-      "jpmorgan.com":
-
-        "J.P. Morgan",
-
-
-
-      "financialexpress.com":
-
-        "Financial Express",
-
-
-
-      "hindustantimes.com":
-
-        "Hindustan Times",
-
-
-
-      "thehindu.com":
-
-        "The Hindu",
-
-
-
-      "timesofindia.indiatimes.com":
-
-        "The Times of India",
-
-
-
-      "indiatoday.in":
-
-        "India Today",
-
-
-
-      "deccanherald.com":
-
-        "Deccan Herald",
-
-
-
-      "telegraphindia.com":
-
-        "The Telegraph",
-
-
-
-      "scroll.in":
-
-        "Scroll.in",
-
-
-
-      "firstpost.com":
-
-        "Firstpost",
-
-
-
-      "theprint.in":
-
-        "ThePrint",
-
-
-
-      "outlookindia.com":
-
-        "Outlook India",
-
-    };
-
-
-
-    if (knownDomains[hostname]) {
-
-      return knownDomains[hostname];
-
-    }
-
-
-
-    const parts = hostname.split(".");
+    const parts = host.split(".");
 
 
 
     if (parts.length >= 2) {
 
-      return parts[parts.length - 2]
+      const name = parts[parts.length - 2];
 
-        .split(/[-\_]/)
+
+
+      return name
+
+        .split(/[-\_]/g)
 
         .map(
 
           (word) =>
 
-            word.charAt(0).toUpperCase() +
-
-            word.slice(1)
+            word.charAt(0).toUpperCase() + word.slice(1)
 
         )
 
@@ -402,7 +501,7 @@ function hostnameToName(
 
 
 
-    return hostname;
+    return host;
 
   } catch {
 
@@ -414,564 +513,207 @@ function hostnameToName(
 
 
 
-function isGenericSource(value: string): boolean {
-  const source = cleanText(value).toLowerCase();
+function cleanSourceName(
 
-  return (
-    source === "google" ||
-    source === "google news" ||
-    source === "google news rss" ||
-    source === "news.google.com"
-  );
-}
-
-function publisherFromTitle(value: unknown): string {
-  const title = cleanText(value);
-
-  if (!title) return "";
-
-  const candidates = [
-    title.match(/\s\|\s([^|]+)$/)?.[1],
-    title.match(/\s[-–—]\s([^|–—-]+)$/)?.[1],
-  ];
-
-  for (const candidate of candidates) {
-    const publisher = cleanText(candidate);
-
-    if (
-      publisher &&
-      !isGenericSource(publisher) &&
-      publisher.length <= 100
-    ) {
-      return publisher;
-    }
-  }
-
-  return "";
-}
-
-function cleanSource(
   value: unknown,
-  url: string,
-  title?: unknown
+
+  url = ""
+
 ): string {
-  const source = cleanText(value)
-    .replace(/\s\|\sGoogle News$/i, "")
-    .replace(/\s-\sGoogle News$/i, "")
-    .replace(/\s\|\sInshorts$/i, "")
-    .replace(/\s-\sInshorts$/i, "")
+
+  let source = cleanText(value);
+
+
+
+  source = source
+
+    .replace(/\s\|\sInshorts\.*$/i, "")
+
+    .replace(/\s-\sInshorts\.*$/i, "")
+
+    .replace(/\s\|\sGoogle News\.*$/i, "")
+
+    .replace(/\s-\sGoogle News\.*$/i, "")
+
     .trim();
 
-  if (source && !isGenericSource(source)) {
-    return source;
-  }
 
-  const fromTitle = publisherFromTitle(title);
 
-  if (fromTitle) {
-    return fromTitle;
-  }
+  if (
 
-  const fromUrl = hostnameToName(url);
+    !source ||
 
-  if (fromUrl && !isGenericSource(fromUrl)) {
-    return fromUrl;
-  }
+    source.toLowerCase() === "unknown source"
 
-  return "Source unavailable";
-}
+  ) {
 
-
-
-function sameTitle(
-
-  a: string,
-
-  b: string
-
-): boolean {
-
-  return (
-
-    normalize(
-
-      cleanTitle(a)
-
-    ) ===
-
-    normalize(
-
-      cleanTitle(b)
-
-    )
-
-  );
-
-}
-
-
-
-function dedupeArticles(
-
-  articles: Article[]
-
-): Article[] {
-
-  const seen =
-
-    new Set<string>();
-
-
-
-  return articles.filter(
-
-    (article) => {
-
-      const key =
-
-        normalize(article.title);
-
-
-
-      if (
-
-        !key ||
-
-        seen.has(key)
-
-      ) {
-
-        return false;
-
-      }
-
-
-
-      seen.add(key);
-
-      return true;
-
-    }
-
-  );
-
-}
-
-
-
-/* =========================================================
-
-   GOOGLE NEWS SEARCH
-
-   ========================================================= */
-
-
-
-async function searchNews(
-
-  query: string
-
-): Promise<Article[]> {
-
-  const rssUrl =
-
-    `https://news.google.com/rss/search?q=${encodeURIComponent(
-
-      query
-
-    )}` +
-
-    `&hl=en-IN&gl=IN&ceid=IN:en`;
-
-
-
-  const response =
-
-    await fetch(rssUrl, {
-
-      cache: "no-store",
-
-      headers: {
-
-        Accept:
-
-          "application/rss+xml, application/xml, text/xml",
-
-      },
-
-    });
-
-
-
-  if (!response.ok) {
-
-    throw new Error(
-
-      `News search failed with HTTP ${response.status}.`
-
-    );
+    source = hostnameToName(url);
 
   }
 
 
 
-  const xml =
+  if (!source) {
 
-    await response.text();
-
-
-
-  if (!xml.trim()) {
-
-    throw new Error(
-
-      "News search returned no data."
-
-    );
+    return "";
 
   }
 
 
 
-  const feed =
-
-    await parser.parseString(
-
-      xml
-
-    );
-
-
-
-  /*
-
-   \* rss-parser normally exposes Google News'
-
-   \* <source> as item.source.\_.
-
-   \*
-
-   \* We also inspect multiple possible shapes
-
-   \* because Google News RSS responses can vary.
-
-   */
-
-  const articles: Article[] =
-
-    (feed.items ?? [])
-
-      .map((item: any) => {
-
-        const url =
-
-          cleanText(item?.link);
-
-
-
-        if (!url) {
-
-          return null;
-
-        }
-
-
-
-        const rawSource =
-
-          item?.source?._ ??
-
-          item?.source?.name ??
-
-          item?.source?.title ??
-
-          item?.source ??
-
-          item?.creator ??
-
-          item?.dcCreator ??
-
-          "";
-
-
-
-        return {
-
-          title:
-
-            cleanTitle(
-
-              item?.title
-
-            ),
-
-
-
-          source:
-
-            cleanSource(
-
-              rawSource,
-
-              url,
-
-              item?.title
-
-            ),
-
-
-
-          publishedAt:
-
-            cleanText(
-
-              item?.isoDate ??
-
-                item?.pubDate ??
-
-                item?.published ??
-
-                ""
-
-            ),
-
-
-
-          description:
-
-            cleanText(
-
-              item?.contentSnippet ??
-
-                item?.content ??
-
-                item?.description ??
-
-                ""
-
-            ),
-
-
-
-          url,
-
-        };
-
-      })
-
-      .filter(
-
-        (
-
-          article
-
-        ): article is Article =>
-
-          article !== null &&
-article.title.length > 0 &&
-article.url.length > 0
-
-      );
-
-
-
-  return dedupeArticles(
-
-    articles
-
-  ).slice(0, 15);
+  return source;
 
 }
 
 
 
-/* =========================================================
+function cleanArticleTitle(title: string): string {
 
-   STORY RELEVANCE
+  return cleanText(title)
 
-   ========================================================= */
+    .replace(/\s\|\sInshorts\.*$/i, "")
 
+    .replace(/\s-\sInshorts\.*$/i, "")
 
+    .replace(/\s\|\sGoogle News\.*$/i, "")
 
-const STOP_WORDS =
+    .replace(/\s-\sGoogle News\.*$/i, "")
 
-  new Set([
-
-    "the",
-
-    "a",
-
-    "an",
-
-    "and",
-
-    "or",
-
-    "for",
-
-    "with",
-
-    "from",
-
-    "into",
-
-    "about",
-
-    "this",
-
-    "that",
-
-    "these",
-
-    "those",
-
-    "what",
-
-    "when",
-
-    "where",
-
-    "why",
-
-    "how",
-
-    "who",
-
-    "which",
-
-    "is",
-
-    "are",
-
-    "was",
-
-    "were",
-
-    "be",
-
-    "to",
-
-    "of",
-
-    "in",
-
-    "on",
-
-    "at",
-
-    "by",
-
-    "as",
-
-    "it",
-
-    "its",
-
-    "their",
-
-    "they",
-
-    "them",
-
-    "has",
-
-    "have",
-
-    "had",
-
-    "will",
-
-    "would",
-
-    "could",
-
-    "should",
-
-    "said",
-
-    "says",
-
-  ]);
-
-
-
-function getTerms(
-
-  value: string
-
-): string[] {
-
-  return Array.from(
-
-    new Set(
-
-      normalize(value)
-
-        .split(/\s+/)
-
-        .filter(
-
-          (term) =>
-
-            term.length >= 3 &&
-
-            !STOP_WORDS.has(term)
-
-        )
-
-    )
-
-  );
+    .trim();
 
 }
 
 
 
-function scoreSupportingArticle(
+function cleanDescription(
+
+  description: string
+
+): string {
+
+  return cleanText(description)
+
+    .replace(/\s\|\sInshorts\.*$/i, "")
+
+    .replace(/\s-\sInshorts\.*$/i, "")
+
+    .trim();
+
+}
+
+
+
+function articleFromItem(item: any): Article | null {
+
+  const link = cleanText(item?.link);
+
+
+
+  if (!link) {
+
+    return null;
+
+  }
+
+
+
+  const rawSource =
+
+    item?.source?._ ??
+
+    item?.source?.name ??
+
+    item?.source?.title ??
+
+    item?.creator ??
+
+    item?.dcCreator ??
+
+    "";
+
+
+
+  const source = cleanSourceName(rawSource, link);
+
+
+
+  return {
+
+    title: cleanArticleTitle(item?.title ?? ""),
+
+    link,
+
+    description: cleanDescription(
+
+      item?.contentSnippet ??
+
+        item?.content ??
+
+        item?.description ??
+
+        ""
+
+    ),
+
+    publishedAt: cleanText(
+
+      item?.isoDate ??
+
+        item?.pubDate ??
+
+        item?.published ??
+
+        ""
+
+    ),
+
+    source,
+
+  };
+
+}
+
+
+
+function getTopicTerms(topic: string): string[] {
+
+  return unique(tokenize(topic));
+
+}
+
+
+
+function scoreTopicRelevance(
 
   article: Article,
 
-  selected: SelectedStory
+  topic: string
 
 ): number {
 
-  const titleTerms =
-
-    getTerms(
-
-      selected.title
-
-    );
+  const topicTerms = getTopicTerms(topic);
 
 
 
-  const descriptionTerms =
+  if (!topicTerms.length) {
 
-    getTerms(
+    return 0;
 
-      selected.description
-
-    );
+  }
 
 
 
-  const articleTitle =
+  const title = normalizeText(article.title);
 
-    normalize(
+  const description = normalizeText(
 
-      article.title
+    article.description
 
-    );
+  );
 
 
 
-  const articleDescription =
-
-    normalize(
-
-      article.description
-
-    );
+  const combined = `${title} ${description}`;
 
 
 
@@ -979,29 +721,157 @@ function scoreSupportingArticle(
 
 
 
-  /*
+  for (const term of topicTerms) {
 
-   \* Strong weight for title overlap.
+    if (title.includes(term)) {
 
-   */
+      score += 6;
 
-  for (const term of titleTerms) {
+    } else if (description.includes(term)) {
+
+      score += 2;
+
+    }
+
+  }
+
+
+
+  const normalizedTopic = normalizeText(topic);
+
+
+
+  if (
+
+    normalizedTopic.length > 4 &&
+
+    title.includes(normalizedTopic)
+
+  ) {
+
+    score += 12;
+
+  }
+
+
+
+  for (const group of TERM_GROUPS) {
+
+    const topicHits = group.filter((term) =>
+
+      normalizedTopic.includes(term)
+
+    );
+
+
+
+    const articleHits = group.filter((term) =>
+
+      combined.includes(term)
+
+    );
+
+
 
     if (
 
-      articleTitle.includes(term)
+      topicHits.length &&
+
+      articleHits.length
 
     ) {
+
+      score += 4;
+
+    }
+
+  }
+
+
+
+  return score;
+
+}
+
+
+
+function scoreStoryRelevance(
+
+  article: Article,
+
+  selectedStory: SelectedStory
+
+): number {
+
+  const selectedTitle = normalizeText(
+
+    selectedStory.title
+
+  );
+
+
+
+  const articleTitle = normalizeText(
+
+    article.title
+
+  );
+
+
+
+  const articleDescription = normalizeText(
+
+    article.description
+
+  );
+
+
+
+  const selectedTerms = unique([
+
+    ...tokenize(selectedStory.title),
+
+    ...tokenize(selectedStory.description ?? ""),
+
+  ]);
+
+
+
+  let score = 0;
+
+
+
+  // Very strong signal: exact headline match.
+
+  if (
+
+    selectedTitle.length > 20 &&
+
+    articleTitle.includes(selectedTitle)
+
+  ) {
+
+    score += 40;
+
+  }
+
+
+
+  // Shared meaningful title terms.
+
+  for (const term of tokenize(
+
+    selectedStory.title
+
+  )) {
+
+    if (articleTitle.includes(term)) {
 
       score += 7;
 
     } else if (
 
-      articleDescription.includes(
-
-        term
-
-      )
+      articleDescription.includes(term)
 
     ) {
 
@@ -1013,29 +883,21 @@ function scoreSupportingArticle(
 
 
 
-  /*
+  // Shared description terms.
 
-   \* Description overlap.
+  for (const term of tokenize(
 
-   */
+    selectedStory.description ?? ""
 
-  for (const term of descriptionTerms) {
+  )) {
 
-    if (
-
-      articleTitle.includes(term)
-
-    ) {
+    if (articleTitle.includes(term)) {
 
       score += 4;
 
     } else if (
 
-      articleDescription.includes(
-
-        term
-
-      )
+      articleDescription.includes(term)
 
     ) {
 
@@ -1047,51 +909,89 @@ function scoreSupportingArticle(
 
 
 
-  /*
+  // Shared two-word phrases from headline.
 
-   \* Same story / near-identical headline.
+  const titleTokens = tokenize(
 
-   */
+    selectedStory.title
 
-  if (
+  );
 
-    sameTitle(
 
-      article.title,
 
-      selected.title
+  for (
 
-    )
+    let i = 0;
+
+    i < titleTokens.length - 1;
+
+    i++
 
   ) {
 
-    score += 30;
+    const phrase = `${titleTokens[i]} ${titleTokens[i + 1]}`;
+
+
+
+    if (articleTitle.includes(phrase)) {
+
+      score += 8;
+
+    }
 
   }
 
 
 
-  /*
+  // Penalize broad topic-only matches.
 
-   \* Same publication isn't independent
+  const topicLikeHits = selectedTerms.filter(
 
-   \* corroboration.
+    (term) => articleTitle.includes(term)
 
-   */
+  ).length;
+
+
 
   if (
 
-    normalize(
+    selectedTerms.length >= 5 &&
 
-      article.source
+    topicLikeHits <= 1
 
-    ) ===
+  ) {
 
-    normalize(
+    score -= 8;
 
-      selected.source
+  }
 
-    )
+
+
+  // Prefer another publication as corroboration.
+
+  const selectedSource = normalizeText(
+
+    selectedStory.source
+
+  );
+
+
+
+  const articleSource = normalizeText(
+
+    article.source
+
+  );
+
+
+
+  if (
+
+    selectedSource &&
+
+    articleSource &&
+
+    selectedSource === articleSource
 
   ) {
 
@@ -1107,53 +1007,475 @@ function scoreSupportingArticle(
 
 
 
-/* =========================================================
+function dedupeArticles(
 
-   GEMINI
+  articles: Article[]
 
-   ========================================================= */
+): Article[] {
+
+  const seen = new Set<string>();
 
 
 
-function getStatus(
+  return articles.filter((article) => {
+
+    const key = normalizeText(
+
+      `${article.title}|${article.link}`
+
+    );
+
+
+
+    if (!key || seen.has(key)) {
+
+      return false;
+
+    }
+
+
+
+    seen.add(key);
+
+
+
+    return true;
+
+  });
+
+}
+
+
+
+function buildCatchUpSearchQueries(topic: string): string[] {
+  const normalized = normalizeText(topic);
+  const terms = getTopicTerms(topic);
+  const queries: string[] = [];
+
+  const add = (value: string) => {
+    const clean = value.trim();
+    if (!clean) return;
+    const key = normalizeText(clean);
+    if (!queries.some((query) => normalizeText(query) === key)) queries.push(clean);
+  };
+
+  add(`${topic} when:14d`);
+
+  const isKpop = normalized.includes("k pop") || normalized.includes("kpop") || normalized.includes("korean pop");
+  const isAI = normalized === "ai" || normalized.includes("artificial intelligence");
+  const isSemiconductor = normalized.includes("semiconductor") || normalized.includes("chip industry") || normalized.includes("chip manufacturing");
+
+  if (isKpop) {
+    add(`${topic} music industry when:14d`);
+    add(`${topic} artists charts when:14d`);
+    add(`${topic} concerts agencies when:14d`);
+    add(`${topic} business entertainment when:14d`);
+  } else if (isAI) {
+    add(`${topic} companies products when:14d`);
+    add(`${topic} research models when:14d`);
+    add(`${topic} regulation copyright when:14d`);
+    add(`${topic} business workforce when:14d`);
+  } else if (isSemiconductor) {
+    add(`${topic} companies manufacturing when:14d`);
+    add(`${topic} investment fabs when:14d`);
+    add(`${topic} supply chain policy when:14d`);
+  } else if (terms.length <= 2) {
+    add(`${topic} business when:14d`);
+    add(`${topic} government when:14d`);
+    add(`${topic} industry when:14d`);
+  }
+
+  return queries.slice(0, 5);
+}
+
+function articleSimilarity(a: Article, b: Article): number {
+  const aTerms = new Set(tokenize(a.title));
+  const bTerms = new Set(tokenize(b.title));
+  if (!aTerms.size || !bTerms.size) return 0;
+  let overlap = 0;
+  for (const term of aTerms) if (bTerms.has(term)) overlap++;
+  return overlap / Math.max(1, Math.min(aTerms.size, bTerms.size));
+}
+
+function sortByFreshnessAndRelevance(
+
+  articles: Article[],
+
+  topic: string
+
+): Article[] {
+
+  const now = Date.now();
+
+
+
+  return [...articles].sort((a, b) => {
+
+    const scoreA = scoreTopicRelevance(
+
+      a,
+
+      topic
+
+    );
+
+
+
+    const scoreB = scoreTopicRelevance(
+
+      b,
+
+      topic
+
+    );
+
+
+
+    const dateA = Date.parse(
+
+      a.publishedAt || ""
+
+    );
+
+
+
+    const dateB = Date.parse(
+
+      b.publishedAt || ""
+
+    );
+
+
+
+    const freshnessA =
+
+      Number.isFinite(dateA)
+
+        ? Math.max(
+
+            0,
+
+            10 -
+
+              (now - dateA) /
+
+                86400000
+
+          )
+
+        : 0;
+
+
+
+    const freshnessB =
+
+      Number.isFinite(dateB)
+
+        ? Math.max(
+
+            0,
+
+            10 -
+
+              (now - dateB) /
+
+                86400000
+
+          )
+
+        : 0;
+
+
+
+    return (
+
+      scoreB +
+
+      freshnessB * 0.5 -
+
+      (scoreA + freshnessA * 0.5)
+
+    );
+
+  });
+
+}
+
+
+
+function selectStorySources(
+
+  articles: Article[],
+
+  selectedStory: SelectedStory,
+
+  topic: string
+
+): Article[] {
+
+  const titleTerms = unique(
+
+    tokenize(selectedStory.title)
+
+  );
+
+
+
+  const candidates = articles
+
+    .filter(
+
+      (article) =>
+
+        article.link !== selectedStory.url &&
+
+        normalizeText(article.title) !==
+
+          normalizeText(selectedStory.title)
+
+    )
+
+    .map((article) => {
+
+      const storyScore = scoreStoryRelevance(
+
+        article,
+
+        selectedStory
+
+      );
+
+
+
+      const topicScore = scoreTopicRelevance(
+
+        article,
+
+        topic
+
+      );
+
+
+
+      const articleText = normalizeText(
+
+        `${article.title} ${article.description}`
+
+      );
+
+
+
+      const sharedTitleTerms = titleTerms.filter(
+
+        (term) => articleText.includes(term)
+
+      );
+
+
+
+      const hasDistinctiveAnchor =
+
+        sharedTitleTerms.some(
+
+          (term) => term.length >= 6
+
+        );
+
+
+
+      const hasTwoStrongAnchors =
+
+        sharedTitleTerms.length >= 2 &&
+
+        hasDistinctiveAnchor;
+
+
+
+      return {
+
+        article,
+
+        score: storyScore * 3 + topicScore,
+
+        storyScore,
+
+        hasTwoStrongAnchors,
+
+      };
+
+    })
+
+    .filter(
+
+      (item) =>
+
+        item.storyScore >= 16 &&
+
+        item.hasTwoStrongAnchors
+
+    )
+
+    .sort(
+
+      (a, b) => b.score - a.score
+
+    );
+
+
+
+  const selected: Article[] = [];
+
+  const usedSources = new Set<string>();
+
+
+
+  for (const candidate of candidates) {
+
+    const source = normalizeText(
+
+      candidate.article.source
+
+    );
+
+
+
+    if (source && usedSources.has(source)) {
+
+      continue;
+
+    }
+
+
+
+    selected.push(candidate.article);
+
+
+
+    if (source) {
+
+      usedSources.add(source);
+
+    }
+
+
+
+    if (selected.length >= 3) {
+
+      break;
+
+    }
+
+  }
+
+
+
+  return selected;
+
+}
+
+
+
+function buildSourceMaterial(
+
+  articles: Article[],
+
+  sources: EvidenceItem[]
+
+): string {
+
+  return articles
+
+    .map((article) => {
+
+      const matchingSource =
+
+        sources.find(
+
+          (source) =>
+
+            source.url === article.link
+
+        );
+
+
+
+      const id =
+
+        matchingSource?.id ??
+
+        "UNKNOWN";
+
+
+
+      return [
+
+        `SOURCE ID: ${id}`,
+
+        `PUBLICATION: ${
+
+          article.source || "Unknown"
+
+        }`,
+
+        `TITLE: ${article.title}`,
+
+        `DATE: ${
+
+          article.publishedAt ||
+
+          "Unknown"
+
+        }`,
+
+        `URL: ${article.link}`,
+
+        `DESCRIPTION: ${
+
+          article.description ||
+
+          "No description available."
+
+        }`,
+
+      ].join("\n");
+
+    })
+
+    .join("\n\n---\n\n");
+
+}
+
+
+
+function getGeminiStatusCode(
 
   error: any
 
 ): number | null {
 
-  const values = [
+  const candidates = [
 
     error?.status,
 
     error?.statusCode,
 
-    error?.code,
-
     error?.response?.status,
 
-    error?.response?.code,
+    error?.error?.status,
 
   ];
 
 
 
-  for (const value of values) {
+  for (const candidate of candidates) {
 
-    const number =
-
-      Number(value);
+    const numeric = Number(candidate);
 
 
 
-    if (
+    if (Number.isFinite(numeric)) {
 
-      Number.isFinite(number) &&
-
-      number > 0
-
-    ) {
-
-      return number;
+      return numeric;
 
     }
 
@@ -1167,19 +1489,23 @@ function getStatus(
 
 
 
-function getErrorMessage(
+function getGeminiErrorMessage(
 
   error: any
 
 ): string {
 
-  return (
+  return cleanText(
 
-    error?.message ||
+    error?.message ??
 
-    error?.error?.message ||
+      error?.error?.message ??
 
-    "AI request failed."
+      error?.response?.data?.error
+
+        ?.message ??
+
+      "Gemini request failed."
 
   );
 
@@ -1187,617 +1513,97 @@ function getErrorMessage(
 
 
 
-async function generateStory(
+function isRetryableGeminiError(
 
-  topic: string,
+  error: any
 
-  selectedStory: SelectedStory,
+): boolean {
 
-  articles: Article[],
+  const status =
 
-  sources: Source[]
+    getGeminiStatusCode(error);
 
-): Promise<StoryResult> {
 
-  if (!ai) {
 
-    throw new Error(
+  if (
 
-      "GEMINI_API_KEY is not configured."
+    status === 429 ||
 
-    );
+    status === 503 ||
+
+    status === 500
+
+  ) {
+
+    return true;
 
   }
 
 
 
-  const sourceMaterial =
+  const message =
 
-    articles
+    getGeminiErrorMessage(
 
-      .map(
+      error
 
-        (article) => {
-
-          const source =
-
-            sources.find(
-
-              (item) =>
-
-                item.url ===
-
-                article.url
-
-            );
+    ).toLowerCase();
 
 
 
-          return `
+  return (
 
-SOURCE ID: ${source?.id ?? "UNKNOWN"}
+    message.includes("overloaded") ||
 
+    message.includes(
 
+      "temporarily unavailable"
 
-PUBLICATION:
+    ) ||
 
-${article.source}
+    message.includes("timeout") ||
 
+    message.includes("rate limit")
 
-
-TITLE:
-
-${article.title}
-
-
-
-DATE:
-
-${article.publishedAt || "Unknown"}
-
-
-
-URL:
-
-${article.url}
-
-
-
-DESCRIPTION:
-
-${
-
-  article.description ||
-
-  "No description available."
+  );
 
 }
 
-`;
 
-        }
 
-      )
+function sleep(
 
-      .join(
+  ms: number
 
-        "\n-----------------------------\n"
+): Promise<void> {
 
-      );
+  return new Promise(
 
+    (resolve) =>
 
+      setTimeout(resolve, ms)
 
-  const prompt = `
-
-You are EIRA.
-
-
-
-EIRA is an information product whose job is to
-
-help a person UNDERSTAND a story, not merely
-
-summarize it.
-
-
-
-The user found this specific story:
-
-
-
-TITLE:
-
-${selectedStory.title}
-
-
-
-SOURCE:
-
-${selectedStory.source}
-
-
-
-DATE:
-
-${selectedStory.publishedAt || "Unknown"}
-
-
-
-DESCRIPTION:
-
-${selectedStory.description || "None"}
-
-
-
-URL:
-
-${selectedStory.url}
-
-
-
-USER'S SEARCH TOPIC:
-
-${topic}
-
-
-
-The user clicked:
-
-
-
-"Understand this story"
-
-
-
-Therefore THIS story is the primary subject.
-
-
-
-Do not replace it with a generic overview of
-
-the search topic.
-
-
-
-The additional sources below exist to help you
-
-verify the story, add context, explain the
-
-mechanism, or show what remains uncertain.
-
-
-
-\==================================================
-
-THE EIRA STANDARD
-
-\==================================================
-
-
-
-A bad result says:
-
-
-
-"Experts highlighted the importance of continued
-
-investment and structural reforms."
-
-
-
-A good result says:
-
-
-
-"Here is the specific thing happening.
-
-Here is what it means.
-
-Here is the piece the headline leaves out.
-
-Here is the number, mechanism, comparison,
-
-or connection that makes it understandable.
-
-Here is what we still cannot conclude."
-
-
-
-The reader should have at least ONE genuine
-
-"oh, now I get it" moment.
-
-
-
-\==================================================
-
-CONTENT RULES
-
-\==================================================
-
-
-
-1. Use ONLY information supported by the supplied
-
-   sources.
-
-
-
-2. You may perform simple arithmetic or logical
-
-   reasoning using numbers and facts explicitly
-
-   contained in the sources.
-
-
-
-3. Do NOT introduce outside facts.
-
-
-
-4. Do NOT invent people, companies, numbers,
-
-   dates, events, causes, consequences, or quotes.
-
-
-
-5. Do NOT turn a person's statement into an
-
-   established fact.
-
-
-
-6. Clearly distinguish:
-
-   \- what happened
-
-   \- what someone said
-
-   \- what the reporting establishes
-
-   \- what remains uncertain
-
-
-
-7. Multiple articles repeating the same statement
-
-   are NOT automatically independent confirmation.
-
-
-
-8. Do not include a related story just because
-
-   it contains the same keyword.
-
-
-
-9. Do not drift into a general topic explainer.
-
-
-
-10. Every section must directly help the reader
-
-    understand THIS story.
-
-
-
-\==================================================
-
-HEADLINE
-
-\==================================================
-
-
-
-Do NOT copy the original headline.
-
-
-
-Create a headline that captures the most
-
-interesting underlying idea.
-
-
-
-The headline should make the reader think:
-
-
-
-"Okay, I want to understand that."
-
-
-
-Avoid clickbait.
-
-
-
-\==================================================
-
-DECK
-
-\==================================================
-
-
-
-One sentence.
-
-
-
-Explain the actual development without
-
-repeating the headline.
-
-
-
-\==================================================
-
-HOOK
-
-\==================================================
-
-
-
-2-4 sentences.
-
-
-
-Give the reader the first useful insight.
-
-
-
-Do not merely repeat the deck.
-
-
-
-\==================================================
-
-STORY SECTIONS
-
-\==================================================
-
-
-
-Create 3 to 5 sections.
-
-
-
-Do NOT use the same fixed headings for every story.
-
-
-
-Choose headings based on the story.
-
-
-
-Possible patterns:
-
-
-
-"What the headline leaves out"
-
-
-
-"Why this number matters"
-
-
-
-"What has to happen for this to work"
-
-
-
-"Why this is happening now"
-
-
-
-"The claim versus the evidence"
-
-
-
-"What remains unclear"
-
-
-
-But only use them when appropriate.
-
-
-
-Each section should answer a natural question
-
-a curious reader would ask next.
-
-
-
-The explanation should generally move through:
-
-
-
-WHAT HAPPENED
-
-↓
-
-WHAT DOES IT ACTUALLY MEAN?
-
-↓
-
-WHAT DOES THE HEADLINE LEAVE OUT?
-
-↓
-
-WHY NOW / WHAT HAS TO HAPPEN?
-
-↓
-
-WHAT IS KNOWN AND UNKNOWN?
-
-
-
-Do not mechanically include every step.
-
-
-
-\==================================================
-
-NO GENERIC AI PROSE
-
-\==================================================
-
-
-
-Avoid phrases like:
-
-
-
-"highlights the importance"
-
-
-
-"underscores the need"
-
-
-
-"rapidly evolving landscape"
-
-
-
-"strong structural execution"
-
-
-
-"significant implications"
-
-
-
-"moving forward"
-
-
-
-"key stakeholders"
-
-
-
-"amid growing uncertainty"
-
-
-
-"the broader ecosystem"
-
-
-
-unless the specific wording is genuinely necessary.
-
-
-
-Replace vague language with concrete explanation.
-
-
-
-\==================================================
-
-SOURCES
-
-\==================================================
-
-
-
-Use only the supplied source IDs.
-
-
-
-Attach source IDs to sections containing factual
-
-claims.
-
-
-
-Do not attach every source to every section.
-
-
-
-Use the smallest useful set of sources.
-
-
-
-\==================================================
-
-TAKEAWAY
-
-\==================================================
-
-
-
-The takeaway should be one useful insight.
-
-
-
-It should NOT simply restate the story.
-
-
-
-The reader should remember something after
-
-leaving the page.
-
-
-
-\==================================================
-
-OUTPUT
-
-\==================================================
-
-
-
-Return ONLY valid JSON.
-
-
-
-Use exactly this structure:
-
-
-
-{
-
-  "mode": "story",
-
-  "headline": "EIRA headline",
-
-  "deck": "One sentence.",
-
-  "hook": "Short useful opening.",
-
-  "sections": [
-
-    {
-
-      "heading": "Specific story heading",
-
-      "paragraphs": [
-
-        "Paragraph one.",
-
-        "Paragraph two."
-
-      ],
-
-      "sourceIds": ["S1"]
-
-    }
-
-  ],
-
-  "bottomLine": "One useful insight."
+  );
 
 }
 
 
 
-SOURCE MATERIAL:
+async function generateGeminiWithFallback(
 
+  prompt: string
 
+): Promise<string> {
 
-${sourceMaterial}
+  if (!ai) {
 
-`;
+    throw new Error(
+
+      "Gemini API key is not configured."
+
+    );
+
+  }
 
 
 
@@ -1811,9 +1617,7 @@ ${sourceMaterial}
 
 
 
-  let lastError: unknown =
-
-    null;
+  let lastError: unknown = null;
 
 
 
@@ -1833,37 +1637,29 @@ ${sourceMaterial}
 
         const response =
 
-          await ai.models.generateContent(
+          await ai.models.generateContent({
 
-            {
+            model,
 
-              model,
+            contents: prompt,
 
-              contents: prompt,
+            config: {
 
-              config: {
+              temperature: 0.45,
 
-                temperature: 0.35,
+            },
 
-                responseMimeType:
-
-                  "application/json",
-
-              },
-
-            }
-
-          );
+          });
 
 
 
-        const raw =
+        const text =
 
           response.text?.trim();
 
 
 
-        if (!raw) {
+        if (!text) {
 
           throw new Error(
 
@@ -1875,333 +1671,7 @@ ${sourceMaterial}
 
 
 
-        let parsed: any;
-
-
-
-        try {
-
-          parsed =
-
-            JSON.parse(raw);
-
-        } catch {
-
-          const start =
-
-            raw.indexOf("{");
-
-
-
-          const end =
-
-            raw.lastIndexOf("}");
-
-
-
-          if (
-
-            start === -1 ||
-
-            end === -1
-
-          ) {
-
-            throw new Error(
-
-              "Gemini returned invalid JSON."
-
-            );
-
-          }
-
-
-
-          parsed =
-
-            JSON.parse(
-
-              raw.slice(
-
-                start,
-
-                end + 1
-
-              )
-
-            );
-
-        }
-
-
-
-        if (
-
-          !parsed ||
-
-          typeof parsed !==
-
-            "object" ||
-
-          typeof parsed.headline !==
-
-            "string" ||
-
-          typeof parsed.deck !==
-
-            "string" ||
-
-          typeof parsed.hook !==
-
-            "string" ||
-
-          !Array.isArray(
-
-            parsed.sections
-
-          ) ||
-
-          typeof parsed.bottomLine !==
-
-            "string"
-
-        ) {
-
-          throw new Error(
-
-            "Gemini returned an incomplete story."
-
-          );
-
-        }
-
-
-
-        const validSourceIds =
-
-          new Set(
-
-            sources.map(
-
-              (source) =>
-
-                source.id
-
-            )
-
-          );
-
-
-
-        const sections: StorySection[] =
-
-          parsed.sections
-
-            .filter(
-
-              (section: any) =>
-
-                section &&
-
-                typeof section.heading ===
-
-                  "string" &&
-
-                Array.isArray(
-
-                  section.paragraphs
-
-                )
-
-            )
-
-            .map(
-
-              (
-
-                section: any
-
-              ) => ({
-
-                heading:
-
-                  cleanText(
-
-                    section.heading
-
-                  ),
-
-
-
-                paragraphs:
-
-                  section.paragraphs
-
-                    .filter(
-
-                      (
-
-                        paragraph: any
-
-                      ) =>
-
-                        typeof paragraph ===
-
-                        "string"
-
-                    )
-
-                    .map(
-
-                      (
-
-                        paragraph: string
-
-                      ) =>
-
-                        cleanText(
-
-                          paragraph
-
-                        )
-
-                    )
-
-                    .filter(Boolean)
-
-                    .slice(0, 4),
-
-
-
-                sourceIds:
-
-                  Array.isArray(
-
-                    section.sourceIds
-
-                  )
-
-                    ? section.sourceIds
-
-                        .filter(
-
-                          (
-
-                            id: any
-
-                          ) =>
-
-                            typeof id ===
-
-                            "string"
-
-                        )
-
-                        .filter(
-
-                          (
-
-                            id: string
-
-                          ) =>
-
-                            validSourceIds.has(
-
-                              id
-
-                            )
-
-                        )
-
-                    : [],
-
-              })
-
-            )
-
-            .filter(
-
-              (
-
-                section: StorySection
-
-              ) =>
-
-                section.heading.length >
-
-                  0 &&
-
-                section.paragraphs
-
-                  .length > 0
-
-            )
-
-            .slice(0, 5);
-
-
-
-        if (!sections.length) {
-
-          throw new Error(
-
-            "Gemini returned no usable sections."
-
-          );
-
-        }
-
-
-
-        return {
-
-          mode: "story",
-
-
-
-          headline:
-
-            cleanText(
-
-              parsed.headline
-
-            ),
-
-
-
-          deck:
-
-            cleanText(
-
-              parsed.deck
-
-            ),
-
-
-
-          hook:
-
-            cleanText(
-
-              parsed.hook
-
-            ),
-
-
-
-          sections,
-
-
-
-          bottomLine:
-
-            cleanText(
-
-              parsed.bottomLine
-
-            ),
-
-        };
+        return text;
 
       } catch (error) {
 
@@ -2209,21 +1679,17 @@ ${sourceMaterial}
 
 
 
-        console.error(
-
-          `EIRA story generation failed using ${model}:`,
-
-          error
-
-        );
-
-
-
         const status =
 
-          getStatus(error);
+          getGeminiStatusCode(
+
+            error
+
+          );
 
 
+
+        // Don't repeatedly retry quota errors.
 
         if (status === 429) {
 
@@ -2235,47 +1701,25 @@ ${sourceMaterial}
 
         if (
 
-          status === 500 ||
+          !isRetryableGeminiError(
 
-          status === 502 ||
+            error
 
-          status === 503 ||
-
-          status === 504
+          )
 
         ) {
 
-          if (
-
-            attempt === 0
-
-          ) {
-
-            await new Promise(
-
-              (resolve) =>
-
-                setTimeout(
-
-                  resolve,
-
-                  1000
-
-                )
-
-            );
-
-
-
-            continue;
-
-          }
+          break;
 
         }
 
 
 
-        break;
+        if (attempt === 0) {
+
+          await sleep(900);
+
+        }
 
       }
 
@@ -2285,51 +1729,13 @@ ${sourceMaterial}
 
 
 
-  const status =
+  throw (
 
-    getStatus(lastError);
+    lastError ??
 
+    new Error(
 
-
-  if (status === 429) {
-
-    throw new Error(
-
-      "EIRA's AI service has reached its current usage limit."
-
-    );
-
-  }
-
-
-
-  if (
-
-    status === 500 ||
-
-    status === 502 ||
-
-    status === 503 ||
-
-    status === 504
-
-  ) {
-
-    throw new Error(
-
-      "EIRA's AI service is temporarily busy. Please try again."
-
-    );
-
-  }
-
-
-
-  throw new Error(
-
-    getErrorMessage(
-
-      lastError
+      "Gemini request failed."
 
     )
 
@@ -2339,11 +1745,1523 @@ ${sourceMaterial}
 
 
 
-/* =========================================================
+function extractJson(
 
-   MAIN STORY API
+  text: string
 
-   ========================================================= */
+): string {
+
+  const cleaned = text
+
+    .replace(
+
+      /^```json\s*/i,
+
+      ""
+
+    )
+
+    .replace(
+
+      /^```\s*/i,
+
+      ""
+
+    )
+
+    .replace(
+
+      /\s\*```$/i,
+
+      ""
+
+    )
+
+    .trim();
+
+
+
+  const firstBrace =
+
+    cleaned.indexOf("{");
+
+
+
+  const lastBrace =
+
+    cleaned.lastIndexOf("}");
+
+
+
+  if (
+
+    firstBrace >= 0 &&
+
+    lastBrace > firstBrace
+
+  ) {
+
+    return cleaned.slice(
+
+      firstBrace,
+
+      lastBrace + 1
+
+    );
+
+  }
+
+
+
+  return cleaned;
+
+}
+
+
+
+function validateStoryResult(
+
+  value: any
+
+): StoryResult {
+
+  if (
+
+    !value ||
+
+    typeof value !== "object" ||
+
+    typeof value.headline !==
+
+      "string" ||
+
+    typeof value.deck !==
+
+      "string" ||
+
+    typeof value.hook !==
+
+      "string" ||
+
+    !Array.isArray(
+
+      value.sections
+
+    ) ||
+
+    typeof value.bottomLine !==
+
+      "string" ||
+
+    (value.confirmed !== undefined &&
+
+      !Array.isArray(value.confirmed)) ||
+
+    (value.openQuestions !== undefined &&
+
+      !Array.isArray(value.openQuestions))
+
+  ) {
+
+    throw new Error(
+
+      "Invalid story response from Gemini."
+
+    );
+
+  }
+
+
+
+  const sections: StorySection[] =
+
+    value.sections
+
+      .filter(
+
+        (section: any) =>
+
+          section &&
+
+          typeof section.heading ===
+
+            "string" &&
+
+          Array.isArray(
+
+            section.paragraphs
+
+          )
+
+      )
+
+      .map((section: any) => ({
+
+        heading:
+
+          cleanText(
+
+            section.heading
+
+          ),
+
+        paragraphs:
+
+          section.paragraphs
+
+            .filter(
+
+              (p: any) =>
+
+                typeof p ===
+
+                "string"
+
+            )
+
+            .map(
+
+              (p: string) =>
+
+                cleanText(p)
+
+            )
+
+            .filter(Boolean)
+
+            .slice(0, 4),
+
+        sourceIds:
+
+          Array.isArray(
+
+            section.sourceIds
+
+          )
+
+            ? section.sourceIds
+
+                .filter(
+
+                  (id: any) =>
+
+                    typeof id ===
+
+                    "string"
+
+                )
+
+                .map(
+
+                  (id: string) =>
+
+                    id.trim()
+
+                )
+
+                .filter(Boolean)
+
+            : [],
+
+      }))
+
+      .filter(
+
+        (section: StorySection) =>
+
+          section.paragraphs
+
+            .length > 0
+
+      )
+
+      .slice(0, 6);
+
+
+
+  if (!sections.length) {
+
+    throw new Error(
+
+      "Story response contains no usable sections."
+
+    );
+
+  }
+
+
+
+  return {
+
+    mode: "story",
+
+    headline:
+
+      cleanText(
+
+        value.headline
+
+      ),
+
+    deck:
+
+      cleanText(value.deck),
+
+    hook:
+
+      cleanText(value.hook),
+
+    sections,
+
+    bottomLine:
+
+      cleanText(
+
+        value.bottomLine
+
+      ),
+
+    confirmed:
+
+      Array.isArray(value.confirmed)
+
+        ? value.confirmed
+
+            .filter((item: any) =>
+
+              typeof item === "string"
+
+            )
+
+            .map((item: string) =>
+
+              cleanText(item)
+
+            )
+
+            .filter(Boolean)
+
+            .slice(0, 5)
+
+        : [],
+
+    openQuestions:
+
+      Array.isArray(value.openQuestions)
+
+        ? value.openQuestions
+
+            .filter((item: any) =>
+
+              typeof item === "string"
+
+            )
+
+            .map((item: string) =>
+
+              cleanText(item)
+
+            )
+
+            .filter(Boolean)
+
+            .slice(0, 5)
+
+        : [],
+
+  };
+
+}
+
+
+
+function validateCatchUpResult(
+
+  value: any,
+
+  sourceCount: number
+
+): CatchUpResult {
+
+  if (
+
+    !value ||
+
+    typeof value !== "object" ||
+
+    typeof value.shortVersion !== "string" ||
+
+    !Array.isArray(value.whatChanged) ||
+
+    !Array.isArray(value.confirmed) ||
+
+    !Array.isArray(value.reported) ||
+
+    !Array.isArray(value.uncertain) ||
+
+    typeof value.whyItMatters !== "string" ||
+
+    !Array.isArray(value.whatToWatch)
+
+  ) {
+
+    throw new Error("Invalid catch-up response from Gemini.");
+
+  }
+
+
+
+  function normalizeSourceIds(sourceIds: unknown): number[] {
+
+    if (!Array.isArray(sourceIds)) return [];
+
+    return Array.from(new Set(
+
+      sourceIds
+
+        .map((id: unknown) => {
+
+          if (typeof id === "number" && Number.isInteger(id)) return id;
+
+          if (typeof id === "string") {
+
+            const value = id.trim();
+
+            const match = value.match(/^S(\d+)$/i);
+
+            if (match) return Number(match[1]);
+
+            if (/^\d+$/.test(value)) return Number(value);
+
+          }
+
+          return null;
+
+        })
+
+        .filter((id): id is number =>
+
+          typeof id === "number" &&
+
+          Number.isInteger(id) &&
+
+          id >= 1 &&
+
+          id <= sourceCount
+
+        )
+
+    ));
+
+  }
+
+
+
+  function normalizeEvidenceItems(
+
+    items: unknown,
+
+    limit: number
+
+  ): CatchUpEvidenceItem[] {
+
+    if (!Array.isArray(items)) return [];
+
+    return items
+
+      .filter((item: unknown) =>
+
+        item &&
+
+        typeof item === "object" &&
+
+        typeof (item as any).text === "string" &&
+
+        Array.isArray((item as any).sourceIds)
+
+      )
+
+      .map((item: any) => ({
+
+        text: cleanText(item.text),
+
+        sourceIds: normalizeSourceIds(item.sourceIds),
+
+      }))
+
+      .filter((item) =>
+
+        item.text.length > 0 &&
+
+        item.sourceIds.length > 0
+
+      )
+
+      .slice(0, limit);
+
+  }
+
+
+
+  return {
+
+    mode: "catchup",
+
+    shortVersion: cleanText(value.shortVersion),
+
+    whatChanged: normalizeEvidenceItems(value.whatChanged, 3),
+
+    confirmed: normalizeEvidenceItems(value.confirmed, 3),
+
+    reported: normalizeEvidenceItems(value.reported, 2),
+
+    uncertain: normalizeEvidenceItems(value.uncertain, 2),
+
+    whyItMatters: cleanText(value.whyItMatters),
+
+    whatToWatch: value.whatToWatch
+
+      .filter((x: any) => typeof x === "string")
+
+      .map((x: string) => cleanText(x))
+
+      .filter(Boolean)
+
+      .slice(0, 5),
+
+  };
+
+}
+
+
+async function generateStoryAnswer(
+
+  topic: string,
+
+  selectedStory: SelectedStory,
+
+  articles: Article[],
+
+  sources: EvidenceItem[]
+
+): Promise<StoryResult> {
+
+  const sourceMaterial =
+
+    buildSourceMaterial(
+
+      articles,
+
+      sources
+
+    );
+
+
+
+  const prompt = `
+
+You are the editorial explanation engine for EIRA.
+
+
+
+EIRA is NOT a news summarizer.
+
+
+
+EIRA exists to make people genuinely understand
+
+interesting things happening in the world.
+
+
+
+The reader has already clicked on THIS SPECIFIC STORY.
+
+
+
+Your job is to explain THIS STORY.
+
+
+
+Do NOT turn this into a generic explainer
+
+about the broader topic.
+
+
+
+TOPIC:
+
+${topic}
+
+
+
+SELECTED STORY:
+
+
+
+TITLE:
+
+${selectedStory.title}
+
+
+
+PUBLICATION:
+
+${selectedStory.source}
+
+
+
+DATE:
+
+${selectedStory.publishedAt || "Unknown"}
+
+
+
+URL:
+
+${selectedStory.url}
+
+
+
+DESCRIPTION:
+
+${selectedStory.description || "None"}
+
+
+
+SUPPORTING REPORTING:
+
+
+
+${sourceMaterial}
+
+
+
+EDITORIAL RULES:
+
+
+
+1\. The selected story is the primary subject.
+
+
+
+2\. Do not drift into a generic explanation
+
+   of the topic.
+
+
+
+3\. Do not simply rewrite the source article.
+
+
+
+4\. Do not copy the source headline.
+
+
+
+5\. EIRA's headline should reveal the interesting
+
+   idea behind the story while remaining factual.
+
+
+
+6\. The reader should learn something that is
+
+   NOT obvious from the original headline.
+
+
+
+7\. Explain the underlying mechanism or connection
+
+   when the reader needs it.
+
+
+
+8\. Every section should answer a natural question
+
+   a curious reader would ask.
+
+
+
+9\. Do not invent facts.
+
+
+
+9a\. The hook must be grounded in the supplied reporting. Do not add
+
+     rhetorical assumptions, motives, comparisons, or conclusions that
+
+     the sources do not establish.
+
+
+
+10\. Do not use outside knowledge that is not
+
+    supported by the supplied reporting.
+
+
+
+11\. Distinguish clearly between:
+
+    \- established facts
+
+    \- statements by officials or companies
+
+    \- claims being reported
+
+    \- things that remain unknown
+
+
+
+12\. An official statement is NOT automatically
+
+    independent confirmation of the underlying claim.
+
+
+
+13\. If the story is a warning, distinguish:
+
+    "someone warned this could happen"
+
+    from
+
+    "this has actually happened."
+
+
+
+14\. Do not include supporting articles merely
+
+    because they are about the same industry.
+
+
+
+15\. Supporting sources must genuinely help explain
+
+    THIS specific story.
+
+
+
+16\. Do not repeat the same idea in:
+
+    \- headline
+
+    \- deck
+
+    \- hook
+
+    \- sections
+
+    \- takeaway
+
+
+
+17\. Preserve the strength of the source wording.
+
+    Do NOT upgrade:
+
+    \- "site dropped" into "project cancelled"
+
+    \- "officials are considering" into "officials decided"
+
+    \- "reported" into "confirmed"
+
+    \- "planned" into "happened"
+
+    \- "could" into "will"
+
+
+
+18\. If the selected story is supported by only
+
+    one relevant source, use careful wording.
+
+    Do not manufacture corroboration.
+
+
+
+19\. If supporting sources are unrelated to the
+
+    selected development, ignore them completely.
+
+    Relevance to the broad topic is not enough.
+
+
+
+17\. Avoid generic AI phrases such as:
+
+    "This is significant because..."
+
+    "It remains to be seen..."
+
+    "The development highlights..."
+
+    unless absolutely necessary.
+
+
+
+18\. Do not use filler.
+
+
+
+19\. Use 3 to 5 sections.
+
+
+
+20\. Section headings must be specific to THIS story.
+
+
+
+21\. Do not force generic sections such as:
+
+    "Why It Matters"
+
+    if a more useful heading exists.
+
+
+
+22\. The explanation should have a clear progression:
+
+
+
+    WHAT HAPPENED
+
+        ↓
+
+    WHY IS THIS INTERESTING?
+
+        ↓
+
+    WHAT DOES THE HEADLINE NOT EXPLAIN?
+
+        ↓
+
+    WHY IS THIS HAPPENING NOW?
+
+        ↓
+
+    WHAT IS FACT / CLAIM / UNKNOWN?
+
+        ↓
+
+    WHAT SHOULD I REMEMBER?
+
+
+
+23\. If a section is unnecessary,
+
+    leave it out.
+
+
+
+24\. The final takeaway must contain an actual
+
+    insight, not a generic conclusion.
+
+
+25\. "confirmed" must contain only directly supported facts.
+
+
+26\. "openQuestions" must contain only meaningful unknowns or decisions
+
+    that the supplied reporting does not resolve. Do not invent uncertainty.
+
+
+27\. If the reporting does not support a useful item for either list,
+
+    leave that list empty.
+
+
+
+25\. The final result should feel like a smart editor
+
+    explaining something to an intelligent person.
+
+
+
+The reader should finish thinking:
+
+
+
+"I understand what actually happened."
+
+
+
+"I understand why it matters."
+
+
+
+"I understand the part the headline didn't tell me."
+
+
+
+NOT:
+
+
+
+"I just read a shorter version of the article."
+
+
+
+OUTPUT ONLY VALID JSON.
+
+
+
+Return exactly:
+
+
+
+{
+
+  "mode": "story",
+
+  "headline": "EIRA's factual but insightful headline",
+
+  "deck": "One sentence explaining what this story is really about.",
+
+  "hook": "A short opening that creates curiosity and gives the first important insight.",
+
+  "sections": [
+
+    {
+
+      "heading": "Story-specific heading",
+
+      "paragraphs": [
+
+        "Paragraph 1",
+
+        "Paragraph 2"
+
+      ],
+
+      "sourceIds": ["S1"]
+
+    }
+
+  ],
+
+  "bottomLine": "The one important insight the reader should remember."
+
+}
+
+
+
+SOURCE RULES:
+
+
+
+Only use source IDs that actually exist.
+
+
+
+If a paragraph contains a factual claim,
+
+attach the relevant source ID.
+
+
+
+Do not attach every source to every paragraph.
+
+
+
+Do not cite unrelated sources.
+
+
+
+Use the minimum number of sources necessary.
+
+
+
+Keep paragraphs concise but substantive.
+
+`;
+
+
+
+  const raw =
+
+    await generateGeminiWithFallback(
+
+      prompt
+
+    );
+
+
+
+  const parsed =
+
+    JSON.parse(
+
+      extractJson(raw)
+
+    );
+
+
+
+  const result =
+
+    validateStoryResult(
+
+      parsed
+
+    );
+
+
+
+  const validSourceIds =
+
+    new Set(
+
+      sources.map(
+
+        (source) =>
+
+          source.id
+
+      )
+
+    );
+
+
+
+  result.sections =
+
+    result.sections.map(
+
+      (section) => ({
+
+        ...section,
+
+        sourceIds:
+
+          section.sourceIds.filter(
+
+            (id) =>
+
+              validSourceIds.has(
+
+                id
+
+              )
+
+          ),
+
+      })
+
+    );
+
+
+
+  return result;
+
+}
+
+
+
+
+function articleAgeInDays(article: Article): number | null {
+  const timestamp = Date.parse(article.publishedAt || "");
+
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  const age = (Date.now() - timestamp) / 86400000;
+
+  if (age < 0) {
+    return 0;
+  }
+
+  return age;
+}
+
+function titlePhrases(article: Article): string[] {
+  const tokens = tokenize(article.title);
+  const phrases: string[] = [];
+
+  for (let i = 0; i < tokens.length - 1; i++) {
+    phrases.push(`${tokens[i]} ${tokens[i + 1]}`);
+  }
+
+  return unique(phrases);
+}
+
+function dominantStoryPhrases(articles: Article[]): Set<string> {
+  const counts = new Map<string, number>();
+
+  for (const article of articles) {
+    for (const phrase of titlePhrases(article)) {
+      counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
+    }
+  }
+
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count >= 3)
+      .map(([phrase]) => phrase)
+  );
+}
+
+function storyClusterOverlap(article: Article, selected: Article[]): number {
+  const phrases = new Set(titlePhrases(article));
+  if (!phrases.size || !selected.length) return 0;
+
+  return Math.max(
+    ...selected.map((item) => {
+      const other = new Set(titlePhrases(item));
+      let overlap = 0;
+      for (const phrase of phrases) {
+        if (other.has(phrase)) overlap++;
+      }
+      return overlap;
+    })
+  );
+}
+
+function selectCatchUpArticles(
+  articles: Article[],
+  topic: string
+): Article[] {
+  const sorted = sortByFreshnessAndRelevance(articles, topic);
+  const recent14 = sorted.filter((article) => {
+    const age = articleAgeInDays(article);
+    return age !== null && age <= 14;
+  });
+  const recent30 = sorted.filter((article) => {
+    const age = articleAgeInDays(article);
+    return age !== null && age <= 30;
+  });
+
+  const pool =
+    recent14.length >= 6
+      ? recent14
+      : recent30.length >= 6
+        ? recent30
+        : sorted;
+
+  const relevant = pool.filter(
+    (article) => scoreTopicRelevance(article, topic) >= 2
+  );
+  const candidates = relevant.length >= 3 ? relevant : pool;
+  const broadTopic = getTopicTerms(topic).length <= 4;
+  const repeatedPhrases = dominantStoryPhrases(candidates);
+
+  const selected: Article[] = [];
+  const selectedSources = new Set<string>();
+
+  while (selected.length < 4 && candidates.length) {
+    let best: Article | null = null;
+    let bestScore = -Infinity;
+
+    for (const article of candidates) {
+      if (selected.includes(article)) continue;
+
+      const source = normalizeText(article.source);
+      const relevance = scoreTopicRelevance(article, topic);
+      const age = articleAgeInDays(article);
+      const freshness = age === null ? 0 : Math.max(0, 10 - age * 0.5);
+      const maxSimilarity = selected.length
+        ? Math.max(...selected.map((item) => articleSimilarity(article, item)))
+        : 0;
+      const clusterOverlap = storyClusterOverlap(article, selected);
+
+      // For broad topics, never let several articles about the same
+      // franchise/product/person/event fill the answer.
+      if (broadTopic && clusterOverlap >= 2) continue;
+
+      const repeatedPhraseHits = titlePhrases(article).filter((phrase) =>
+        repeatedPhrases.has(phrase)
+      ).length;
+
+      const noveltyBonus = 16 * (1 - maxSimilarity);
+      const sourceBonus = source && !selectedSources.has(source) ? 7 : -8;
+      const clusterPenalty = broadTopic
+        ? repeatedPhraseHits * 8
+        : repeatedPhraseHits * 4;
+
+      const score =
+        relevance * 2 +
+        freshness +
+        noveltyBonus +
+        sourceBonus -
+        clusterPenalty;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = article;
+      }
+    }
+
+    if (!best) break;
+
+    selected.push(best);
+    const source = normalizeText(best.source);
+    if (source) selectedSources.add(source);
+  }
+
+  return selected.length > 0 ? selected : sorted.slice(0, 4);
+}
+
+async function generateCatchUpAnswer(
+
+  topic: string,
+
+  articles: Article[],
+
+  sources: EvidenceItem[]
+
+): Promise<CatchUpResult> {
+
+  const sourceMaterial =
+
+    buildSourceMaterial(
+
+      articles,
+
+      sources
+
+    );
+
+
+
+  const currentDate =
+    new Date().toISOString().slice(0, 10);
+
+  const prompt = `
+
+You are the EIRA Catch Me Up editorial engine.
+
+EIRA is NOT a news feed and NOT an article-by-article summarizer.
+
+EIRA's job is to help a reader understand the main thing
+happening around a topic right now, using a small amount of
+high-quality current reporting.
+
+CURRENT DATE:
+${currentDate}
+
+TOPIC:
+${topic}
+
+REPORTING:
+${sourceMaterial}
+
+EDITORIAL GOAL:
+
+First identify the 2-3 dominant developments or themes that
+actually explain what is happening around this topic now.
+
+Then build one coherent explanation around those developments.
+
+Do NOT produce a list of unrelated stories just because they
+contain the same keyword.
+
+Do NOT mention a person, company, lawsuit, product, or event
+unless it materially helps explain the topic.
+
+BROAD-TOPIC RULE:
+If the topic is broad (for example "K-pop", "AI", or "semiconductors"),
+do NOT let one franchise, company, artist, product, lawsuit, or viral story
+stand in for the entire topic. Prefer distinct developments across the topic.
+A single entity can be used for one development, but repeated coverage of
+the same entity should not become multiple developments.
+
+If several supplied sources are all about the same franchise, product,
+artist, company, lawsuit, or event, treat them as ONE development even if
+the headlines are different. Do not use multiple outlets covering that same
+story to fill the remaining development slots. Prefer another distinct
+story from the topic, or return fewer developments if no distinct story is
+supported by the reporting.
+
+If the current reporting is genuinely dominated by one story, say so clearly
+instead of pretending that story represents the entire topic.
+
+If the reporting is fragmented, say that the picture is
+fragmented rather than stitching unrelated stories together.
+
+For a broad topic, the presence of one highly visible entertainment,
+celebrity, franchise, product, or viral story does NOT mean that story is
+the topic itself. Treat it as one current development and look for other
+independent developments in the supplied reporting.
+
+The "shortVersion" must be a genuine synthesis:
+it should answer "What is actually going on?" in 2-3 sentences.
+
+"WhatChanged" is for the 2-3 most important recent developments.
+These must be distinct developments, not one item per source.
+
+"Confirmed" is for facts or events directly established by
+the supplied reporting.
+
+"Reported" is for important claims or developments that are
+being reported but are not independently established.
+
+"Uncertain" is for the most important unresolved question(s).
+Do not fill this section with generic uncertainty.
+
+"whyItMatters" should explain the practical consequence of
+the main development, not simply repeat the shortVersion.
+
+"whatToWatch" should contain at most 2 concrete future
+developments that could materially change the picture.
+
+FRESHNESS:
+
+The supplied reporting has already been filtered toward recent
+coverage. Prefer recent developments. Do not revive old stories
+just because they are interesting. Older material should only
+be used when it is necessary context.
+
+EVIDENCE RULES:
+
+- Do not invent information.
+- Do not treat an official statement as independent confirmation
+  of the underlying claim.
+- Multiple outlets repeating the same statement do not
+  automatically make the underlying claim confirmed.
+- Keep reported claims separate from confirmed facts.
+- Every evidence item MUST contain at least one valid sourceId.
+- Use only source IDs supplied below.
+- Do not repeat the same proposition across sections.
+- Keep every evidence item concise.
+- If there is not enough evidence for a section, return [].
+
+SOURCE IDs:
+- Every evidence item MUST include sourceIds.
+- Use only the supplied IDs, such as "S1", "S2", "S3".
+- Never invent a source ID.
+
+OUTPUT ONLY VALID JSON:
+
+{
+  "mode": "catchup",
+
+  "shortVersion": "A coherent 2-3 sentence synthesis of what is happening now.",
+
+  "whatChanged": [
+    {
+      "text": "The most important recent development.",
+      "sourceIds": ["S1", "S2"]
+    }
+  ],
+
+  "confirmed": [
+    {
+      "text": "A fact or event directly established by the supplied reporting.",
+      "sourceIds": ["S1"]
+    }
+  ],
+
+  "reported": [
+    {
+      "text": "An important claim or development that remains reported rather than independently established.",
+      "sourceIds": ["S2"]
+    }
+  ],
+
+  "uncertain": [
+    {
+      "text": "The most important unresolved question.",
+      "sourceIds": ["S1", "S3"]
+    }
+  ],
+
+  "whyItMatters": "A concrete explanation of why the main development matters.",
+
+  "whatToWatch": [
+    "A concrete next development that could materially change the picture."
+  ]
+}
+
+LIMITS:
+
+- whatChanged: maximum 3
+- confirmed: maximum 3
+- reported: maximum 2
+- uncertain: maximum 2
+- whatToWatch: maximum 2
+
+QUALITY CHECK BEFORE RETURNING:
+
+1. Does the answer describe a coherent picture rather than a list
+   of unrelated articles?
+2. Does every evidence item have a valid source ID?
+3. Are the most recent developments doing most of the work?
+4. Are reported claims clearly separated from confirmed facts?
+5. Is the unresolved question genuinely useful?
+6. Could a reader understand the topic without opening all the sources?
+7. Have you removed duplicate ideas?
+
+`;
+
+
+
+  const raw =
+
+    await generateGeminiWithFallback(
+
+      prompt
+
+    );
+
+
+
+  return validateCatchUpResult(
+
+    JSON.parse(
+
+      extractJson(raw)
+
+    ),
+
+    sources.length
+
+  );
+
+}
+
+
+
+async function fetchGoogleNews(
+
+  query: string
+
+): Promise<Article[]> {
+
+  const encoded =
+
+    encodeURIComponent(query);
+
+
+
+  const rssUrl =
+
+    `https://news.google.com/rss/search?q=${encoded}&hl=en-IN&gl=IN&ceid=IN:en`;
+
+
+
+  const feed =
+
+    await parser.parseURL(
+
+      rssUrl
+
+    );
+
+
+
+  const articles =
+
+    (feed.items ?? [])
+
+      .map(articleFromItem)
+
+      .filter(
+  (
+    article: Article | null | undefined
+  ): article is Article =>
+    Boolean(article)
+)
+
+      .filter(
+  (article: Article) =>
+    article.title.length > 0
+)
+
+
+
+  return dedupeArticles(
+
+    articles
+
+  );
+
+}
+
+
+
+function createSources(
+
+  articles: Article[]
+
+): EvidenceItem[] {
+
+  return articles.map(
+
+    (article, index) => ({
+
+      id: `S${index + 1}`,
+
+      title: article.title,
+
+      url: article.link,
+
+      source:
+
+        cleanSourceName(
+
+          article.source,
+
+          article.link
+
+        ) || "Source",
+
+      publishedAt:
+
+        article.publishedAt,
+
+    })
+
+  );
+
+}
+
+
+
+function selectedStoryAsArticle(
+
+  selectedStory: SelectedStory
+
+): Article {
+
+  return {
+
+    title: cleanArticleTitle(
+
+      selectedStory.title
+
+    ),
+
+    link: selectedStory.url,
+
+    description:
+
+      cleanDescription(
+
+        selectedStory.description ??
+
+          ""
+
+      ),
+
+    publishedAt:
+
+      selectedStory.publishedAt ??
+
+      "",
+
+    source:
+
+      cleanSourceName(
+
+        selectedStory.source,
+
+        selectedStory.url
+
+      ) || "Source",
+
+  };
+
+}
 
 
 
@@ -2354,6 +3272,8 @@ export async function POST(
 ) {
 
   try {
+
+    const language = getLanguageFromRequest(request);
 
     const body =
 
@@ -2373,9 +3293,67 @@ export async function POST(
 
 
 
-    const rawSelected =
+    const selectedStory:
 
-      body?.selectedStory;
+      | SelectedStory
+
+      | null =
+
+      body?.selectedStory &&
+
+      typeof body.selectedStory ===
+
+        "object"
+
+        ? {
+
+            title: cleanText(
+
+              body.selectedStory
+
+                .title
+
+            ),
+
+            source: cleanText(
+
+              body.selectedStory
+
+                .source
+
+            ),
+
+            publishedAt:
+
+              cleanText(
+
+                body.selectedStory
+
+                  .publishedAt
+
+              ),
+
+            description:
+
+              cleanText(
+
+                body.selectedStory
+
+                  .description
+
+              ),
+
+            url: cleanText(
+
+              body.selectedStory
+
+                .url
+
+            ),
+
+          }
+
+        : null;
 
 
 
@@ -2403,505 +3381,299 @@ export async function POST(
 
 
 
-    if (
-
-      !rawSelected ||
-
-      typeof rawSelected !==
-
-        "object"
-
-    ) {
-
-      return NextResponse.json(
-
-        {
-
-          error:
-
-            "No story was selected.",
-
-        },
-
-        {
-
-          status: 400,
-
-        }
-
-      );
-
-    }
-
-
-
-    const selectedStory: SelectedStory =
-
-      {
-
-        title:
-
-          cleanTitle(
-
-            rawSelected.title
-
-          ),
-
-
-
-        source:
-
-          cleanSource(
-
-            rawSelected.source,
-
-            rawSelected.url || "",
-
-            rawSelected.title
-
-          ),
-
-
-
-        publishedAt:
-
-          cleanText(
-
-            rawSelected.publishedAt
-
-          ),
-
-
-
-        description:
-
-          cleanText(
-
-            rawSelected.description
-
-          ),
-
-
-
-        url:
-
-          cleanText(
-
-            rawSelected.url
-
-          ),
-
-      };
-
-
-
-    if (
-
-      !selectedStory.title ||
-
-      !selectedStory.url
-
-    ) {
-
-      return NextResponse.json(
-
-        {
-
-          error:
-
-            "The selected story is missing required information.",
-
-        },
-
-        {
-
-          status: 400,
-
-        }
-
-      );
-
-    }
-
-
-
-    /* -----------------------------------------------------
-
-       SEARCH THE EXACT STORY FIRST
-
-       ----------------------------------------------------- */
-
-
-
-    let exactArticles =
-
-      await searchNews(
-
-        `"${selectedStory.title}"`
-
-      );
-
-
-
     /*
 
-     \* Find the actual publisher for the
+     * ==========================================
 
-     \* selected story.
+     * STORY MODE
 
-     \*
+     * ==========================================
 
-     \* This fixes the "GOOGLE" problem when
+     *
 
-     \* Explore passed Google as the source.
+     * Used by /story.
+
+     *
+
+     * We search using the exact story headline
+
+     * + topic so supporting reporting is much
+
+     * more likely to be about THIS development.
 
      */
 
-    const matchingArticle =
-
-      exactArticles.find(
-
-        (article) =>
-
-          sameTitle(
-
-            article.title,
-
-            selectedStory.title
-
-          )
-
-      );
 
 
+    if (
 
-    if (matchingArticle) {
+      selectedStory?.title &&
 
-      selectedStory.source =
+      selectedStory?.url
 
-        cleanSource(
+    ) {
 
-          matchingArticle.source,
+      const titleQuery =
 
-          matchingArticle.url,
+        cleanArticleTitle(
 
-          matchingArticle.title
+          selectedStory.title
 
         );
 
 
 
+      const searchQuery =
+
+        `"${titleQuery}" ${topic}`.slice(
+
+          0,
+
+          240
+
+        );
+
+
+
+      let articles =
+
+        await fetchGoogleNews(
+
+          searchQuery
+
+        );
+
+
+
+      /*
+       * Never fall back to the broad topic alone.
+       * Broad topic results can be unrelated to the
+       * specific story the user asked EIRA to explain.
+       *
+       * If exact-title search is sparse, make a narrower
+       * query from the strongest words in the selected
+       * headline. Supporting sources are still filtered
+       * by selectStorySources.
+       */
+
       if (
 
-        !selectedStory.publishedAt &&
-
-        matchingArticle.publishedAt
+        articles.length < 2
 
       ) {
 
-        selectedStory.publishedAt =
+        const anchorTerms = unique(
 
-          matchingArticle.publishedAt;
+          tokenize(selectedStory.title)
+
+        )
+
+          .filter(
+
+            (term) => term.length >= 5
+
+          )
+
+          .slice(0, 6);
+
+
+
+        if (anchorTerms.length >= 2) {
+
+          const focusedQuery =
+
+            `${anchorTerms.join(" ")} ${topic}`
+
+              .slice(0, 240);
+
+
+
+          const focusedArticles =
+
+            await fetchGoogleNews(
+
+              focusedQuery
+
+            );
+
+
+
+          articles =
+
+            dedupeArticles([
+
+              ...articles,
+
+              ...focusedArticles,
+
+            ]);
+
+        }
 
       }
 
 
 
-      if (
+      const selectedArticle =
 
-        !selectedStory.description &&
+        selectedStoryAsArticle(
 
-        matchingArticle.description
+          selectedStory
 
-      ) {
-
-        selectedStory.description =
-
-          matchingArticle.description;
-
-      }
-
-    }
+        );
 
 
 
-    /* -----------------------------------------------------
+      const storySources =
 
-       TOPIC FALLBACK
+        selectStorySources(
 
-       ----------------------------------------------------- */
+          articles,
 
-
-
-    let topicArticles: Article[] =
-
-      [];
-
-
-
-    if (
-
-      exactArticles.length < 4
-
-    ) {
-
-      topicArticles =
-
-        await searchNews(
+          selectedStory,
 
           topic
 
         );
 
-    }
+
+
+      /*
+
+       * Selected story ALWAYS comes first.
+
+       * Only genuinely relevant supporting
+
+       * articles are added after it.
+
+       */
 
 
 
-    const allArticles =
+      const finalArticles =
 
-      dedupeArticles([
+        dedupeArticles([
 
-        ...exactArticles,
+          selectedArticle,
 
-        ...topicArticles,
+          ...storySources,
 
-      ]);
-
-
-
-    /* -----------------------------------------------------
-
-       SUPPORTING SOURCES
-
-       ----------------------------------------------------- */
+        ]).slice(0, 5);
 
 
 
-    const supportingArticles =
+      const sources =
 
-      allArticles
+        createSources(
 
-        .filter(
-
-          (article) =>
-
-            !sameTitle(
-
-              article.title,
-
-              selectedStory.title
-
-            )
-
-        )
-
-        .map(
-
-          (article) => ({
-
-            article,
-
-            score:
-
-              scoreSupportingArticle(
-
-                article,
-
-                selectedStory
-
-              ),
-
-          })
-
-        )
-
-        .filter(
-
-          (item) =>
-
-            item.score >= 8
-
-        )
-
-        .sort(
-
-          (a, b) =>
-
-            b.score - a.score
-
-        )
-
-        .slice(0, 4)
-
-        .map(
-
-          (item) =>
-
-            item.article
+          finalArticles
 
         );
 
 
 
-    /*
+      const result =
 
-     \* Selected story is ALWAYS first.
+        await generateStoryAnswer(
 
-     */
+          topic,
 
-    const selectedArticle: Article =
+          selectedStory,
 
-      {
+          finalArticles,
 
-        title:
+          sources
 
-          selectedStory.title,
+        );
 
+      const translatedResult =
+        await translateStoryResult(result, language);
 
+      return NextResponse.json({
 
-        source:
+        result: translatedResult,
 
-          selectedStory.source,
+        sources,
 
+        selectedStory,
 
-
-        publishedAt:
-
-          selectedStory.publishedAt,
-
-
-
-        description:
-
-          selectedStory.description,
-
-
-
-        url:
-
-          selectedStory.url,
-
-      };
-
-
-
-    const finalArticles =
-
-      dedupeArticles([
-
-        selectedArticle,
-
-        ...supportingArticles,
-
-      ]).slice(0, 5);
-
-
-
-    if (
-
-      finalArticles.length === 0
-
-    ) {
-
-      return NextResponse.json(
-
-        {
-
-          error:
-
-            "EIRA couldn't find enough reporting for this story.",
-
-        },
-
-        {
-
-          status: 404,
-
-        }
-
-      );
+      });
 
     }
 
 
 
-    /* -----------------------------------------------------
+    /*
 
-       SOURCES
+     * ==========================================
 
-       ----------------------------------------------------- */
+     * CATCH ME UP MODE
 
+     * ==========================================
 
+     *
 
-    const sources: Source[] =
+     * Used by /catch-up.
 
-      finalArticles.map(
+     *
 
-        (
+     * This remains separate so the existing
 
-          article,
+     * Catch Me Up page continues to work.
 
-          index
-
-        ) => ({
-
-          id:
-
-            `S${index + 1}`,
+     */
 
 
 
-          title:
+    const searchQueries = buildCatchUpSearchQueries(topic);
 
-            article.title,
+    const searchResults = await Promise.allSettled(
+      searchQueries.map((query) => fetchGoogleNews(query))
+    );
 
+    let articles = dedupeArticles(
+      searchResults.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : []
+      )
+    );
 
-
-          source:
-
-            cleanSource(
-
-              article.source,
-
-              article.url,
-
-              article.title
-
-            ),
-
-
-
-          publishedAt:
-
-            article.publishedAt,
+    if (articles.length < 4) {
+      const fallbackArticles = await fetchGoogleNews(topic);
+      articles = dedupeArticles([
+        ...articles,
+        ...fallbackArticles,
+      ]);
+    }
 
 
 
-          url:
+    const finalArticles =
 
-            article.url,
+      selectCatchUpArticles(
 
-        })
+        articles,
+
+        topic
 
       );
 
 
 
-    /* -----------------------------------------------------
+    const sources =
 
-       GENERATE STORY
+      createSources(
 
-       ----------------------------------------------------- */
+        finalArticles
+
+      );
 
 
 
     const result =
 
-      await generateStory(
+      await generateCatchUpAnswer(
 
         topic,
-
-        selectedStory,
 
         finalArticles,
 
@@ -2911,35 +3683,46 @@ export async function POST(
 
 
 
-    return NextResponse.json(
+    const translatedResult =
+      await translateCatchUpResult(result, language);
 
-      {
+    const catchUpSources =
 
-        result,
+      sources.map((source, index) => ({
 
-        sources,
+        ...source,
 
-        selectedStory,
+        id: index + 1,
 
-      },
+      }));
 
-      {
+    return NextResponse.json({
 
-        status: 200,
+      result: translatedResult,
 
-      }
+      sources: catchUpSources,
 
-    );
+    });
 
-  } catch (error) {
+  } catch (error: any) {
 
     console.error(
 
-      "EIRA Story API error:",
+      "EIRA Catch Up API error:",
 
       error
 
     );
+
+
+
+    const status =
+
+      getGeminiStatusCode(
+
+        error
+
+      );
 
 
 
@@ -2949,17 +3732,35 @@ export async function POST(
 
         error:
 
-          error instanceof Error
+          status === 429
 
-            ? error.message
+            ? "EIRA has temporarily reached its AI request limit. Please try again shortly."
 
-            : "EIRA couldn't build this story.",
+            : status === 503
+
+              ? "EIRA's AI service is temporarily busy. Please try again shortly."
+
+              : cleanText(
+
+                  error?.message ||
+
+                    "Something went wrong while generating the explanation."
+
+                ),
 
       },
 
       {
 
-        status: 500,
+        status:
+
+          status === 429 ||
+
+          status === 503
+
+            ? status
+
+            : 500,
 
       }
 

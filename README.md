@@ -1,33 +1,40 @@
-# EIRA
+EIRA HOME PIPELINE FIX — 05 OCT 2026
 
-**Understand the information that matters.**
+Replace these two files in the current EIRA project:
 
-EIRA is a Next.js information platform designed to help people understand important developments without having to sort through endless information themselves.
+1. route(3).ts
+   -> your current Home API route (/api/home)
+2. eira-translate.ts
+   -> your current translation utility
 
-## What EIRA does
+WHAT THIS FIX CHANGES
+- Adds a dedicated Technology editorial category.
+- Retrieves Tamil Nadu, India and World news by editorial beat instead of one giant global ranking.
+- Reserves topic coverage before filling remaining slots by score.
+- Translates only the stories that Home actually renders (3 regional + 3 India + 2 World).
+- Adds a 6-hour in-process translation cache for repeated language switches.
+- Improves Tamil translation instructions for natural news-style Tamil.
+- Raises the normal Home freshness window from 36h to 48h.
+- Adds a bounded 72h emergency pool so a transient feed timestamp problem does not create an empty Home.
+- Reduces Home retrieval from roughly 28 Google News queries to 19.
+- Adds 5-minute shared-cache headers with stale-while-revalidate.
 
-EIRA is organized around a few core ways of understanding information:
+IMPORTANT
+This does not change the Home visual design. Do not replace the Home page yet.
+First replace these two backend files, run the app, and verify the API/Home feed.
 
-- **Home** — surfaces what matters nationally and globally, with regional relevance where available.
-- **Catch Me Up** — gives context around a topic, including what changed, what is confirmed, what is reported, what remains uncertain, and why it matters.
-- **Explore** — helps discover topics and developments worth understanding.
-- **Ask EIRA** — lets users ask questions about current developments.
-- **Story** — provides deeper context around an individual development.
-- **Library** — lets users follow topics and return to saved areas of interest.
+RUN
+npm run dev
 
-## Tech stack
+Then open:
+/api/home?region=Tamil%20Nadu&lang=en
+/api/home?region=Tamil%20Nadu&lang=ta
+/api/home?region=Tamil%20Nadu&lang=hi
 
-- Next.js
-- React
-- TypeScript
-- Tailwind CSS
-- Google Gemini API
-- Google News RSS
-- Supabase / external data services where configured
+The JSON should contain non-empty regional, india and world arrays when current reporting exists.
 
-## Run locally
+After that, test the UI in this order:
+English -> Tamil -> Hindi -> English
+Home -> refresh -> Home again
 
-Install dependencies:
-
-```bash
-npm install
+Do NOT change Gemini model names or unrelated UI files during this test.
